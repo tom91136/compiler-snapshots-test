@@ -19,7 +19,7 @@ git remote add origin https://github.com/gcc-mirror/gcc.git
 git config --local gc.auto 0
 
 for build in "${builds_array[@]}"; do
-
+  build="$build-$(uname -m)"
   dest_dir="/tmp/$build"
   dest_archive="/host/$build.tar.xz"
 

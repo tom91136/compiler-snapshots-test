@@ -11,6 +11,7 @@ builds_array=(${BUILDS//;/ }) # split by ws
 echo "Token=$TOKEN"
 
 for build in "${builds_array[@]}"; do
+  build="$build-$(uname -m)"
   echo "Creating release: $build"
 
   build_artefact="$build.tar.xz"
