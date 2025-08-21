@@ -1,0 +1,16 @@
+name: Generate GCC snapshots
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+  schedule:
+    - cron: "0 0 * * *" # end of day everyday
+
+jobs:
+  gcc:
+    uses: ./.github/workflows/shared.yaml
+    secrets: inherit
+    with:
+      build_script: action_build_gcc.sh
+      config: gcc

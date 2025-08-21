@@ -1,0 +1,115 @@
+name: Generate snapshots
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        required: true
+        type: string
+      build_script:
+        required: true
+        type: string
+
+# Just give up if we have a new commit
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build_container:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore cached image
+        id: restore-image
+        uses: actions/cache@v4
+        with:
+          path: /tmp/build_image.tar
+          key: ${{ hashFiles('Dockerfile') }}-${{ matrix.os }}
+
+      - name: Set up Docker Buildx
+        if: steps.restore-image.outputs.cache-hit != 'true'
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build and export
+        if: steps.restore-image.outputs.cache-hit != 'true'
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          tags: build_image:latest
+          outputs: type=docker,dest=/tmp/build_image.tar
+
+  compute_builds:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.set-builds.outputs.builds }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Compute required builds
+        run: sbt "project generator; run ${{ inputs.config }} $GITHUB_REPOSITORY"
+
+      - name: Show builds
+        run: |
+          jq . matrix-${{ inputs.config }}.json
+          jq . builds-${{ inputs.config }}.json
+
+      - name: Set output
+        id: set-builds
+        run: |
+          builds=$(jq '.[0:2]' matrix-${{ inputs.config }}.json)
+          echo "builds=$builds" >> $GITHUB_OUTPUT
+
+      - name: Save build artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: builds
+          path: builds-${{ inputs.config }}.json
+
+  build:
+    needs: [ compute_builds, build_container ]
+    if: ${{ needs.compute_builds.outputs.matrix != '[]' && needs.compute_builds.outputs.matrix != '' }}
+    strategy:
+      fail-fast: false # don't give up too early
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        jobs: ${{ fromJson(needs.compute_builds.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore cached image
+        id: restore-image
+        uses: actions/cache@v4
+        with:
+          path: /tmp/build_image.tar
+          key: ${{ hashFiles('Dockerfile') }}-${{ matrix.os }}
+
+      - name: Restore build artefact
+        uses: actions/download-artifact@v5
+        with:
+          name: builds
+
+      - name: Discard build config name
+        run: mv builds-${{ inputs.config }}.json builds.json
+
+      - name: Load image
+        run: docker load --input /tmp/build_image.tar
+
+      - name: Start build
+        uses: nick-fields/retry@v2.8.2
+        with:
+          timeout_minutes: 360
+          max_attempts: 1
+          command: docker run -v $(pwd):/host build_image:latest /host/${{ inputs.build_script }} "${{ matrix.jobs }}"
+
+      - name: Create releases
+        run: ./action_create_release.sh "${{ secrets.GITHUB_TOKEN }}" "${{ matrix.jobs }}"

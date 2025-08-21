@@ -1,0 +1,16 @@
+name: Generate LLVM snapshots
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+  schedule:
+    - cron: "0 0 * * *" # end of day everyday
+
+jobs:
+  llvm:
+    uses: ./.github/workflows/shared.yaml
+    secrets: inherit
+    with:
+      build_script: action_build_llvm.sh
+      config: llvm
