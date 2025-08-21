@@ -19,9 +19,8 @@ git remote add origin https://github.com/gcc-mirror/gcc.git
 git config --local gc.auto 0
 
 for build in "${builds_array[@]}"; do
-  build="$build-$(uname -m)"
-  dest_dir="/tmp/$build"
-  dest_archive="/host/$build.tar.xz"
+  dest_dir="/tmp/$build-$(uname -m)"
+  dest_archive="/host/$build-$(uname -m).tar.xz"
 
   hash=$(jq -r ".\"$build\" | .hash" "/host/builds.json")
 
@@ -29,7 +28,7 @@ for build in "${builds_array[@]}"; do
   # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113181
   SAN_FIX=d5ca27efb4b69f8fdf38240ad62cc1af30a30f77
 
-  echo "Build   : $build"
+  echo "Build   : $build-$(uname -m)"
   echo "Commit  : $hash"
 
   git -c protocol.version=2 fetch \
@@ -68,7 +67,7 @@ for build in "${builds_array[@]}"; do
   if $dry; then
     echo "Dry run, creating dummy artefact..."
     mkdir -p "$dest_dir"
-    echo "$build" >"$dest_dir/data.txt"
+    echo "$build-$(uname -m)" >"$dest_dir/data.txt"
   else
 
     pwd
@@ -82,7 +81,7 @@ for build in "${builds_array[@]}"; do
       cd build
       ../configure \
         CFLAGS=-Wno-error=incompatible-pointer-types \
-        --prefix="/opt/$build" \
+        --prefix="/opt/$build-$(uname -m)" \
         --enable-languages=c,c++,fortran \
         --disable-bootstrap \
         --disable-multilib \
