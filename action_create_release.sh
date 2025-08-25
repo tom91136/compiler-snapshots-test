@@ -103,6 +103,7 @@ END
     -T "$build_artefact" \
     "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$build_artefact" | cat
 
+  echo ""
   echo "Release uploaded"
 
 done

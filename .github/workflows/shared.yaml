@@ -16,7 +16,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-
   build_container:
     strategy:
       matrix:
@@ -65,7 +64,7 @@ jobs:
       - name: Set output
         id: set-builds
         run: |
-          builds=$(jq -c '.[-2:]' matrix-${{ inputs.config }}.json)
+          builds=$(jq -c '.[-10:]' matrix-${{ inputs.config }}.json)
           echo "builds=$builds" >> $GITHUB_OUTPUT
 
       - name: Save build artefact
@@ -75,7 +74,7 @@ jobs:
           path: builds-${{ inputs.config }}.json
 
   build:
-    needs: [ compute_builds, build_container ]
+    needs: [compute_builds, build_container]
     if: ${{ needs.compute_builds.outputs.matrix != '[]' && needs.compute_builds.outputs.matrix != '' }}
     strategy:
       fail-fast: false # don't give up too early
@@ -83,6 +82,8 @@ jobs:
         os: [ubuntu-24.04, ubuntu-24.04-arm]
         jobs: ${{ fromJson(needs.compute_builds.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 

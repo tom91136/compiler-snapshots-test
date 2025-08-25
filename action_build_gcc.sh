@@ -8,7 +8,7 @@ set -u
 
 BUILDS=$1
 
-dry=true
+dry=false
 
 # shellcheck disable=SC2206
 builds_array=(${BUILDS//;/ }) # split by ws

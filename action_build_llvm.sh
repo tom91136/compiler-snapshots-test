@@ -8,7 +8,7 @@ set -u
 
 BUILDS=$1
 
-dry=true
+dry=false
 
 # shellcheck disable=SC2206
 builds_array=(${BUILDS//;/ }) # split by ws
@@ -85,9 +85,11 @@ for build in "${builds_array[@]}"; do
     time CXXFLAGS="-include cstdint -include cstdlib -include string -include cstdio -Wno-template-id-cdtor -Wno-missing-template-keyword -Wno-attributes" \
       cmake3 -S llvm -B build \
       -DCMAKE_BUILD_TYPE=Release \
-      -DBUILD_SHARED_LIBS=OFF \
+      -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DLLVM_LINK_LLVM_DYLIB=ON \
+      -DLLVM_BUILD_LLVM_DYLIB=ON \
       -DLLVM_ENABLE_PROJECTS="clang;lld;openmp;pstl" \
-      -DLLVM_ENABLE_RTTI=ON \
+      -DLLVM_TARGETS_TO_BUILD="X86;AArch64;NVPTX;AMDGPU" \
       -DLLVM_INCLUDE_BENCHMARKS=OFF \
       -DLLVM_INCLUDE_TESTS=OFF \
       -DLLVM_INCLUDE_DOCS=OFF \
