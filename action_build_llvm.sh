@@ -84,7 +84,7 @@ for build in "${builds_array[@]}"; do
     # compiler-rt implements atomic which openmp needs
     time CXXFLAGS="-include cstdint -include cstdlib -include string -include cstdio -Wno-template-id-cdtor -Wno-missing-template-keyword -Wno-attributes" \
       cmake3 -S llvm -B build \
-      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DLLVM_ENABLE_ASSERTIONS=ON \
       -DLLVM_LINK_LLVM_DYLIB=ON \
       -DLLVM_BUILD_LLVM_DYLIB=ON \

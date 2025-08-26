@@ -89,8 +89,8 @@ for build in "${builds_array[@]}"; do
         --without-isl \
         $extra
     )
-    time make -C build -j "$(nproc)"
-    time make -C build -j "$(nproc)" install DESTDIR="$dest_dir"
+    time make -S -C build -j "$(nproc)"
+    time make -S -C build -j "$(nproc)" install DESTDIR="$dest_dir"
 
   fi
 
