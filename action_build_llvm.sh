@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -eu pipefail
+set -eu
 
 set +u # scl_source has unbound vars, disable check
 source scl_source enable gcc-toolset-14 || true
@@ -66,7 +66,7 @@ for build in "${builds_array[@]}"; do
 
       if [ ! -x "$prefix/bin/cmake" ]; then
         dnf install openssl-devel -y
-        
+
         curl -L "https://cmake.org/files/${cmake_major}/cmake-${cmake_ver}.tar.gz" -o "$src_tar"
         tar xf "$src_tar" -C "$workdir"
         cd "$src_dir"

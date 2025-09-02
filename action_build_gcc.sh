@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -eu pipefail
+set -eu
 
 set +u # scl_source has unbound vars, disable check
 source scl_source enable gcc-toolset-14 || true
