@@ -59,7 +59,7 @@ for build in "${builds_array[@]}"; do
   if [ "$has_san_fix" -ne 0 ]; then
     extra="--disable-libsanitizer"
   else
-    echo "Commit does not require disabling support, continuing..."
+    echo "Commit does not require disabling ASAN support, continuing..."
     extra=""
   fi
 
@@ -80,15 +80,19 @@ for build in "${builds_array[@]}"; do
     install_dir="$dest_dir/opt/$build-$(uname -m)"
     mkdir -p "$install_dir"
 
+    flags="-O2 -gline-tables-only -gz -fno-omit-frame-pointer"
+
     {
 
     time ./contrib/download_prerequisites --no-isl --no-verify
     (
       cd build
       ../configure \
-        CFLAGS='-Wno-error=incompatible-pointer-types -Wno-maybe-uninitialized'\
+        CXXFLAGS="$flags" \
+        CFLAGS="$flags -Wno-error=incompatible-pointer-types -Wno-maybe-uninitialized" \
         --prefix="/opt/$build-$(uname -m)" \
         --enable-languages=c,c++,fortran \
+        --disable-nls \
         --disable-bootstrap \
         --disable-multilib \
         --disable-libvtv \

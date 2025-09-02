@@ -109,9 +109,13 @@ for build in "${builds_array[@]}"; do
     install_dir="$dest_dir/opt/$build-$(uname -m)"
     mkdir -p "$install_dir"
 
+    flags="-gline-tables-only -gz -fno-omit-frame-pointer"
+
     {
 
-    time CXXFLAGS="-include cstdint -include cstdlib -include string -include cstdio -Wno-template-id-cdtor -Wno-missing-template-keyword -Wno-attributes -Wno-maybe-uninitialized" \
+    time \
+    CFLAGS="$flags" \
+    CXXFLAGS="$flags -include cstdint -include cstdlib -include string -include cstdio -Wno-template-id-cdtor -Wno-missing-template-keyword -Wno-attributes -Wno-maybe-uninitialized" \
       cmake3 -S llvm -B build \
       -DCMAKE_BUILD_TYPE=Release \
       -DLLVM_ENABLE_ASSERTIONS=ON \
