@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -eu
+set -eu pipefail
 
 set +u # scl_source has unbound vars, disable check
 source scl_source enable gcc-toolset-14 || true
@@ -76,6 +76,8 @@ for build in "${builds_array[@]}"; do
     rm -rf build
     mkdir -p build
 
+    {
+
     time ./contrib/download_prerequisites --no-isl --no-verify
     (
       cd build
@@ -89,13 +91,14 @@ for build in "${builds_array[@]}"; do
         --without-isl \
         $extra
     )
-    time make -S -C build -j "$(nproc)"
-    time make -S -C build -j "$(nproc)" install DESTDIR="$dest_dir"
+    time make --silent -C build -j "$(nproc)"
+    time make --silent -C build -j "$(nproc)" install DESTDIR="$dest_dir"
+
+    } 2>&1 | tee -a "$dest_dir/opt/$build-$(uname -m)/build.log"
 
   fi
 
-  XZ_OPT='-T0 -2' tar cfJ "$dest_archive" --checkpoint=.1000 --totals -C "$dest_dir" .
-  # zip -r "$dest_archive" "$dest_dir"
+  tar -I 'xz -T0 -9e --block-size=16MiB' cfJ "$dest_archive" --checkpoint=.1000 --totals --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -C "$dest_dir" .
 
   du -sh "$dest_dir"
   du -sh "$dest_archive"

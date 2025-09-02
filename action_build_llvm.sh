@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -eu
+set -eu pipefail
 
 set +u # scl_source has unbound vars, disable check
 source scl_source enable gcc-toolset-14 || true
@@ -57,12 +57,25 @@ for build in "${builds_array[@]}"; do
   fi
 
   if [ "$has_tgt_fix" -ne 0 ]; then
-    echo "Commit requires CMake < 3.17, downloading that now..."
-    curl -L "https://github.com/Kitware/CMake/releases/download/v3.16.4/cmake-3.16.4-Linux-x86_64.sh" -o "cmake-install.sh"
-    chmod +x "./cmake-install.sh"
-    "./cmake-install.sh" --skip-license --include-subdir
-    rm -rf "./cmake-install.sh"
-    cmake3() { "$PWD/cmake-3.16.4-Linux-x86_64/bin/cmake" "$@"; }
+      cmake_ver="3.16.4"
+      cmake_major="v3.16"
+      workdir="$PWD"
+      src_tar="$workdir/cmake-${cmake_ver}.tar.gz"
+      src_dir="$workdir/cmake-${cmake_ver}"
+      prefix="$workdir/cmake-${cmake_ver}-local"
+
+      if [ ! -x "$prefix/bin/cmake" ]; then
+        curl -L "https://cmake.org/files/${cmake_major}/cmake-${cmake_ver}.tar.gz" -o "$src_tar"
+        tar xf "$src_tar" -C "$workdir"
+        cd "$src_dir"
+        ./bootstrap --prefix="$prefix"
+        make -j "$(nproc)"
+        make install
+        cd "$workdir"
+        rm -rf "$src_dir" "$src_tar"
+      fi
+      cmake3() { "$prefix/bin/cmake" "$@"; }
+      cmake3 --version
   else
     echo "Commit does not require CMake < 3.17, continuing..."
   fi
@@ -81,10 +94,12 @@ for build in "${builds_array[@]}"; do
     rm -rf build
     mkdir -p build
 
+    {
+
     # compiler-rt implements atomic which openmp needs
     time CXXFLAGS="-include cstdint -include cstdlib -include string -include cstdio -Wno-template-id-cdtor -Wno-missing-template-keyword -Wno-attributes" \
       cmake3 -S llvm -B build \
-      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_BUILD_TYPE=Release \
       -DLLVM_ENABLE_ASSERTIONS=ON \
       -DLLVM_LINK_LLVM_DYLIB=ON \
       -DLLVM_BUILD_LLVM_DYLIB=ON \
@@ -105,10 +120,11 @@ for build in "${builds_array[@]}"; do
     time cmake3 --build build # Ninja is parallel by default
     time cmake3 --build build --target install
 
+    } 2>&1 | tee -a "$dest_dir/opt/$build-$(uname -m)/build.log"
+
   fi
 
-  XZ_OPT='-T0 -2' tar cfJ "$dest_archive" --checkpoint=.1000 --totals -C "$dest_dir" .
-  # zip -r "$dest_archive" "$dest_dir"
+  XZ_OPT='-T0 -9e --block-size=16MiB' tar cfJ "$dest_archive" --checkpoint=.1000 --totals --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -C "$dest_dir" .
 
   du -sh "$dest_dir"
   du -sh "$dest_archive"
