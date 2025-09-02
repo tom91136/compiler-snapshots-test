@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -eu
+set -euo pipefail
 
 set +u # scl_source has unbound vars, disable check
 source scl_source enable gcc-toolset-14 || true
@@ -12,6 +12,8 @@ dry=false
 
 # shellcheck disable=SC2206
 builds_array=(${BUILDS//;/ }) # split by ws
+
+builds_array=("foo")
 
 git init llvm
 cd llvm
@@ -65,8 +67,7 @@ for build in "${builds_array[@]}"; do
       prefix="$workdir/cmake-${cmake_ver}-local"
 
       if [ ! -x "$prefix/bin/cmake" ]; then
-        dnf install openssl-devel -y
-
+        # CMake needs openssl-devel, which is included in the build image
         curl -L "https://cmake.org/files/${cmake_major}/cmake-${cmake_ver}.tar.gz" -o "$src_tar"
         tar xf "$src_tar" -C "$workdir"
         cd "$src_dir"
@@ -96,10 +97,12 @@ for build in "${builds_array[@]}"; do
     rm -rf build
     mkdir -p build
 
+    install_dir="$dest_dir/opt/$build-$(uname -m)"
+    mkdir -p "$install_dir"
+
     {
 
-    # compiler-rt implements atomic which openmp needs
-    time CXXFLAGS="-include cstdint -include cstdlib -include string -include cstdio -Wno-template-id-cdtor -Wno-missing-template-keyword -Wno-attributes" \
+    time CXXFLAGS="-include cstdint -include cstdlib -include string -include cstdio -Wno-template-id-cdtor -Wno-missing-template-keyword -Wno-attributes -Wno-maybe-uninitialized" \
       cmake3 -S llvm -B build \
       -DCMAKE_BUILD_TYPE=Release \
       -DLLVM_ENABLE_ASSERTIONS=ON \
@@ -116,13 +119,13 @@ for build in "${builds_array[@]}"; do
       -DLLVM_BUILD_EXAMPLES=OFF \
       -DLLVM_STATIC_LINK_CXX_STDLIB=ON \
       -DLIBOMP_USE_QUAD_PRECISION=OFF \
-      -DCMAKE_INSTALL_PREFIX="$dest_dir/opt/$build-$(uname -m)" \
+      -DCMAKE_INSTALL_PREFIX="$install_dir" \
       -GNinja
 
     time cmake3 --build build # Ninja is parallel by default
     time cmake3 --build build --target install
-
-    } 2>&1 | tee -a "$dest_dir/opt/$build-$(uname -m)/build.log"
+     
+    } 2>&1 | tee "$install_dir/build.log"
 
   fi
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -eu
+set -euo pipefail
 
 set +u # scl_source has unbound vars, disable check
 source scl_source enable gcc-toolset-14 || true
@@ -76,13 +76,16 @@ for build in "${builds_array[@]}"; do
     rm -rf build
     mkdir -p build
 
+    install_dir="$dest_dir/opt/$build-$(uname -m)"
+    mkdir -p "$install_dir"
+
     {
 
     time ./contrib/download_prerequisites --no-isl --no-verify
     (
       cd build
       ../configure \
-        CFLAGS=-Wno-error=incompatible-pointer-types \
+        CFLAGS='-Wno-error=incompatible-pointer-types -Wno-maybe-uninitialized'\
         --prefix="/opt/$build-$(uname -m)" \
         --enable-languages=c,c++,fortran \
         --disable-bootstrap \
@@ -94,11 +97,11 @@ for build in "${builds_array[@]}"; do
     time make --silent -C build -j "$(nproc)"
     time make --silent -C build -j "$(nproc)" install DESTDIR="$dest_dir"
 
-    } 2>&1 | tee -a "$dest_dir/opt/$build-$(uname -m)/build.log"
+    } 2>&1 | tee "$install_dir/build.log"
 
   fi
 
-  tar -I 'xz -T0 -9e --block-size=16MiB' cfJ "$dest_archive" --checkpoint=.1000 --totals --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -C "$dest_dir" .
+  XZ_OPT='-T0 -9e --block-size=16MiB' tar cfJ "$dest_archive" --checkpoint=.1000 --totals --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -C "$dest_dir" .
 
   du -sh "$dest_dir"
   du -sh "$dest_archive"
