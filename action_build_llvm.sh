@@ -13,7 +13,31 @@ dry=false
 # shellcheck disable=SC2206
 builds_array=(${BUILDS//;/ }) # split by ws
 
-builds_array=("foo")
+cmake_prefix="$PWD"
+
+build_cmake(){
+  local cmake_major=$1
+  local cmake_ver=$2
+
+  local prefix="$cmake_prefix/cmake-${cmake_ver}"
+  local workdir="/tmp"
+  local src_tar="$workdir/cmake-${cmake_ver}.tar.gz"
+  local src_dir="$workdir/cmake-${cmake_ver}"
+  
+  if [ ! -x "$prefix/bin/cmake" ]; then
+    # CMake needs openssl-devel, which is included in the build image
+    curl -L "https://cmake.org/files/${cmake_major}/cmake-${cmake_ver}.tar.gz" -o "$src_tar"
+    tar xf "$src_tar" -C "$workdir"
+    cd "$src_dir"
+    ./bootstrap --prefix="$prefix"
+    make -j "$(nproc)"
+    make install DESTDIR
+    cd "$workdir"
+    rm -rf "$src_dir" "$src_tar"
+  fi
+
+  eval "cmake3() { \"$prefix/bin/cmake\" \"\$@\"; }"
+}
 
 git init llvm
 cd llvm
@@ -42,8 +66,8 @@ for build in "${builds_array[@]}"; do
     --filter=blob:none \
     origin "$hash" "$TGT_FIX"
 
-  git checkout -q "$hash"
-
+  git checkout -f -q "$hash"
+  git clean -fdx
 
   has_tgt_fix=0
   if git merge-base --is-ancestor "$TGT_FIX" "$hash"; then
@@ -59,29 +83,14 @@ for build in "${builds_array[@]}"; do
   fi
 
   if [ "$has_tgt_fix" -ne 0 ]; then
-      cmake_ver="3.16.4"
-      cmake_major="v3.16"
-      workdir="$PWD"
-      src_tar="$workdir/cmake-${cmake_ver}.tar.gz"
-      src_dir="$workdir/cmake-${cmake_ver}"
-      prefix="$workdir/cmake-${cmake_ver}-local"
-
-      if [ ! -x "$prefix/bin/cmake" ]; then
-        # CMake needs openssl-devel, which is included in the build image
-        curl -L "https://cmake.org/files/${cmake_major}/cmake-${cmake_ver}.tar.gz" -o "$src_tar"
-        tar xf "$src_tar" -C "$workdir"
-        cd "$src_dir"
-        ./bootstrap --prefix="$prefix"
-        make -j "$(nproc)"
-        make install
-        cd "$workdir"
-        rm -rf "$src_dir" "$src_tar"
-      fi
-      cmake3() { "$prefix/bin/cmake" "$@"; }
-      cmake3 --version
+    echo "Commit requires CMake < 3.17, building from scratch..."
+    build_cmake "v3.16" "3.16.4"
   else
     echo "Commit does not require CMake < 3.17, continuing..."
+    cmake3() { /usr/bin/cmake "$@"; }
   fi
+
+  cmake3 --version
 
   echo "Source cloned, starting build step..."
 

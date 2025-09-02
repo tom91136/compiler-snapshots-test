@@ -40,7 +40,8 @@ for build in "${builds_array[@]}"; do
     --filter=blob:none \
     origin "$hash" "$SAN_FIX"
 
-  git checkout -q "$hash"
+  git checkout -f -q "$hash"
+  git clean -fdx
 
   has_san_fix=0
   if git merge-base --is-ancestor "$SAN_FIX" "$hash"; then
