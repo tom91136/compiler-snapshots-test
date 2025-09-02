@@ -172,3 +172,6 @@ a26206e
 # gcc-12+2021-09-10Z
 332a9f7
 57b7c43
+
+# gcc-13.2022-11-13Z, broken sphinx invocation
+d777b38

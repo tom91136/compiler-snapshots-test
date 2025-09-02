@@ -14,21 +14,26 @@ import scala.collection.immutable.VectorMap
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 import scala.util.Using
+
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.errors.TransportException
-import org.eclipse.jgit.lib.{Constants, Ref}
+import org.eclipse.jgit.lib.Constants
+import org.eclipse.jgit.lib.ObjectId
+import org.eclipse.jgit.lib.Ref
 import org.eclipse.jgit.revwalk.RevCommit
+import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.revwalk.filter.RevFilter
 import org.eclipse.jgit.transport.TagOpt
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.treewalk.filter.PathFilter
 
-def writeText(xs: String, path: Path) = Files.writeString(
+def writeText(xs: String, path: Path): Unit = Files.writeString(
   path,
   xs,
   StandardOpenOption.TRUNCATE_EXISTING,
   StandardOpenOption.CREATE,
   StandardOpenOption.WRITE
-)
+): Unit
 
 final val GHAMaxJobCount = 256
 
@@ -44,14 +49,14 @@ case class Config(
 )
 
 // Released GCC will be in a branch: refs/heads/releases/gcc-$ver.
-// Unreleased GCC won't have a branch but we can query refs/tags/basepoints/gcc-$ver which marks
+// Unreleased GCC won't have a branch, but we can query refs/tags/basepoints/gcc-$ver which marks
 // the first commit, we can then do a ranged log between the basepoint with HEAD
 val GCC = Config(
   name = "gcc",
   mirror = "https://github.com/gcc-mirror/gcc.git",
   tags = { case (s"refs/tags/basepoints/gcc-$ver", ref) => ver -> ref },
   branches = { case (s"refs/heads/releases/gcc-$ver", ref) => ver -> ref },
-  filter = _.toIntOption.exists(_ >= 8)
+  filter = _.toIntOption.exists(_ >= 5)
 )
 
 // LLVM has a similar pattern to GCC with basepoints and release branches for version >= 10.
@@ -59,23 +64,45 @@ val GCC = Config(
 // In this situation, any subproject commits leading to the merge will appear to be part of the LLVM
 // tree but without any of the monorepo's files.
 // To work around this, we must clone with trees and then check to see whether the expected paths
-// exists to filter out any commits with no buildable sources.
+// exist to filter out any commits with no buildable sources.
 val LLVM = Config(
   name = "llvm",
   mirror = "https://github.com/llvm/llvm-project.git",
-  tags = { case (s"refs/tags/llvmorg-$ver-init", ref) => ver -> ref },
+  tags = {
+    case (s"refs/tags/llvmorg-$ver-init", ref) => ver -> ref // >= 10, use explicit init tag used as basepoint
+    case (s"refs/tags/llvmorg-$maj.$_.$_", ref) if maj.forall(_.isDigit) && maj.toInt < 10 =>
+      maj -> ref // pre-10, no basepoints
+  },
   branches = { case (s"refs/heads/release/$ver.x", ref) => ver -> ref },
-  // XXX We must start after 10 because the `llvmorg-$ver-init` tag format is only introduced
-  // in that version, see https://github.com/llvm/llvm-project/releases/tag/llvmorg-10-init
-  filter = _.toIntOption.exists(_ >= 10),
+  filter = _.toIntOption.exists(_ >= 4),
   requirePath = Some("llvm/CMakeLists.txt")
 )
+
+def resolveFirst(repo: org.eclipse.jgit.lib.Repository, refs: String*): ObjectId =
+  refs.view
+    .map(repo.resolve)
+    .find(_ != null)
+    .getOrElse {
+      throw new IllegalStateException(s"None of ${refs.mkString(", ")} exist in ${repo.getDirectory}")
+    }
+
+def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): RevCommit = {
+  val walk = new RevWalk(repo)
+  try {
+    walk.setRevFilter(RevFilter.MERGE_BASE)
+    walk.markStart(walk.parseCommit(a))
+    walk.markStart(walk.parseCommit(b))
+    val base = walk.next()
+    if (base == null) throw new IllegalStateException("No merge-base found")
+    base
+  } finally walk.close()
+}
 
 object Generator {
 
   def main(args: Array[String]): Unit = {
 
-    sys.props += ("org.slf4j.simpleLogger.logFile" -> "System.out")
+    sys.props += ("org.slf4j.simpleLogger.logFile" -> "System.out"): Unit
 
     val ignoreCommits = Files
       .readAllLines(Paths.get("./ignore_commits"))
@@ -152,16 +179,24 @@ object Generator {
       .flatMap { case (ver, basepoint) =>
         val repo    = git.getRepository
         val reader  = repo.newObjectReader()
+        val head    = resolveFirst(repo, "refs/heads/main", "refs/heads/master", "refs/heads/trunk", Constants.HEAD)
         val endSpec = branches.get(ver) match {
           case Some(branchRef) => branchRef.getName
-          case None            => Constants.HEAD
+          case None            => head.getName
         }
-        val endRef = repo.resolve(endSpec)
-        println(s"Basepoint=$basepoint => Branch=$endSpec ($endRef)")
+        val endRef        = repo.resolve(endSpec)
+        val basepointSpec = basepoint.getName match {
+          case s"$_-init" => Option(basepoint.getPeeledObjectId)
+          case _          => None
+        }
+        val startRef = basepointSpec.getOrElse(mergeBase(repo, head, endRef))
+
+        println(s"Basepoint=$basepointSpec ${startRef}=> Branch=$endSpec ($endRef)")
+
         val commits =
           git
             .log()
-            .addRange(basepoint.getPeeledObjectId, endRef)
+            .addRange(startRef, endRef)
             .call()
             .asScala
             .toVector
@@ -228,7 +263,7 @@ object Generator {
 
     // val releasedBuilds = fetchReleases(repoOwner, repoName).map(_.tag_name).toSet
     // XXX GH limits the release API to max 1000 entries regardless of items per page or page count
-    //   To workaround this, we list the Git tags which is required for a release and doesn't have
+    //   To work around this, we list the Git tags which is required for a release and doesn't have
     //   arbitrary API limits.
     val releasedBuilds = Try {
       val localRepo = Git.open(Paths.get(".").toFile)

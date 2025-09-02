@@ -1,5 +1,6 @@
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
+import org.typelevel.scalacoptions.ScalacOptions
 
 import org.scalajs.linker.interface.ESFeatures
 import org.scalajs.linker.interface.ESVersion
@@ -10,7 +11,7 @@ lazy val start = TaskKey[Unit]("start")
 lazy val dist  = TaskKey[File]("dist")
 
 lazy val scala3Version  = "3.7.2"
-lazy val upickleVersion = "4.2.1"
+lazy val upickleVersion = "4.3.0"
 lazy val munitVersion   = "1.0.0-M5"
 
 lazy val commonSettings = Seq(
@@ -24,8 +25,8 @@ lazy val commonSettings = Seq(
       "-parameters",
       "-Xlint:all"
     ) ++
-      Seq("-source", "1.8") ++
-      Seq("-target", "1.8"),
+      Seq("-source", "11") ++
+      Seq("-target", "11"),
   scalacOptions ++= Seq(
     "-Wunused:all",                              //
     "-no-indent",                                //
@@ -79,6 +80,11 @@ lazy val webapp = project
         .withModuleKind(ModuleKind.CommonJSModule)
         .withESFeatures(ESFeatures.Defaults.withESVersion(ESVersion.ES2015))
         .withParallel(true)
+    ),
+    Global / excludeLintKeys ++= Set(
+      webpackExtraArgs,
+      webpackDevServerExtraArgs,
+      webpackDevServerPort
     ),
     useYarn                         := true,
     webpackDevServerPort            := 8001,

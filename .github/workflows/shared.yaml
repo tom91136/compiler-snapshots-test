@@ -64,7 +64,7 @@ jobs:
       - name: Set output
         id: set-builds
         run: |
-          builds=$(jq -c '.[-10:]' matrix-${{ inputs.config }}.json)
+          builds=$(jq -c '.[-30:]' matrix-${{ inputs.config }}.json)
           echo "builds=$builds" >> $GITHUB_OUTPUT
 
       - name: Save build artefact
