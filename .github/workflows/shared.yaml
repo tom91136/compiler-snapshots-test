@@ -105,12 +105,46 @@ jobs:
       - name: Load image
         run: docker load --input /tmp/build_image.tar
 
-      - name: Start build
-        uses: nick-fields/retry@v2.8.2
-        with:
-          timeout_minutes: 360
-          max_attempts: 1
-          command: docker run -v $(pwd):/host build_image:latest /host/${{ inputs.build_script }} "${{ matrix.jobs }}"
+      - name: Build & create releases
+        env:
+          JOBS: ${{ matrix.jobs }}
+          BUILD_SCRIPT: ${{ inputs.build_script }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail  # no -e: keep going
+          IFS=';' read -r -a jobs <<< "$JOBS"
+          failed=()
 
-      - name: Create releases
-        run: ./action_create_release.sh "${{ secrets.GITHUB_TOKEN }}" "${{ matrix.jobs }}"
+          for job in "${jobs[@]}"; do
+            [[ -z "$job" ]] && continue
+
+            echo "::group::Build $job"
+            if timeout 6h docker run --rm -v "$PWD:/host" build_image:latest "/host/$BUILD_SCRIPT" "$job"; then
+              echo "::endgroup::"
+              echo "::group::Release $job"
+              if ./action_create_release.sh "$TOKEN" "$job"; then
+                echo "Release for $job done."
+              else
+                echo "Release for $job FAILED." >&2
+                failed+=("$job (release)")
+              fi
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "Build for $job FAILED — skipping release." >&2
+              failed+=("$job (build)")
+            fi
+          done
+
+          if ((${#failed[@]})); then
+            {
+              echo "### Failed builds"
+              for f in "${failed[@]}"; do
+                echo "- $f"
+              done
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::error::${#failed[@]} build(s) failed: ${failed[*]}"
+            exit 1
+          else
+            echo "All builds succeeded." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
