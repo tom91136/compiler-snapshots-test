@@ -109,7 +109,7 @@ for build in "${builds_array[@]}"; do
     install_dir="$dest_dir/opt/$build-$(uname -m)"
     mkdir -p "$install_dir"
 
-    flags="-gline-tables-only -gz -fno-omit-frame-pointer"
+    flags="-g1 -gz -fno-omit-frame-pointer"
 
     {
 
