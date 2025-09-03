@@ -32,18 +32,19 @@ for build in "${builds_array[@]}"; do
   file "$build_artefact"
   ls -lah "$build_artefact"
 
+  build_no_arch="${build%.*}"
   # make sure it's quoted, so no `-r`
-  quotedChanges=$(jq "[ .\"$build\" | .changes | .[] | \"[\`\(.[0])\`] \`\(.[1]/1000 | todateiso8601)\` \(.[2])\"] | join(\"\n\")" builds.json)
+  quoted_changes=$(jq "[ .\"$build_no_arch\" | .changes | .[] | \"[\`\(.[0])\`] \`\(.[1]/1000 | todateiso8601)\` \(.[2])\"] | join(\"\n\")" builds.json)
 
   echo "Build  : $build"
-  echo "Changes: $quotedChanges"
+  echo "Changes: $quoted_changes"
 
   release_config=$(
     cat <<-END
 {
   "tag_name": "$build",
   "name": "$build",
-  "body": $quotedChanges,
+  "body": $quoted_changes,
   "draft": false,
   "prerelease": false,
   "generate_release_notes": false
