@@ -48,7 +48,8 @@ for build in "${builds_array[@]}"; do
   dest_dir="/tmp/$build"
   dest_archive="/host/$build.tar.xz"
 
-  hash=$(jq -r ".\"$build\" | .hash" "/host/builds.json")
+  build_no_arch="${build%.*}"
+  hash=$(jq -r ".\"$build_no_arch\" | .hash" "/host/builds.json")
 
   # Commits before https://github.com/llvm/llvm-project/commit/7f5fe30a150e will only work with
   # CMake < 3.17 due to a bug in LLVM's ExternalProjectAdd.

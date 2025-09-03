@@ -22,7 +22,8 @@ for build in "${builds_array[@]}"; do
   dest_dir="/tmp/$build"
   dest_archive="/host/$build.tar.xz"
 
-  hash=$(jq -r ".\"$build\" | .hash" "/host/builds.json")
+  build_no_arch="${build%.*}"
+  hash=$(jq -r ".\"$build_no_arch\" | .hash" "/host/builds.json")
 
   # Commits before d5ca27efb4b69f8fdf38240ad62cc1af30a30f77 requires an old glibc for asan to work
   # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113181
