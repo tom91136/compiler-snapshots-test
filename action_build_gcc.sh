@@ -6,6 +6,16 @@ set +u # scl_source has unbound vars, disable check
 source scl_source enable gcc-toolset-14 || true
 set -u
 
+export PATH="/usr/lib64/ccache${PATH:+:${PATH}}"
+
+for bin in gcc g++ cc c++; do
+  ln -sf "/usr/bin/ccache" "/usr/local/bin/$bin"
+done
+
+ccache -M 10G
+ccache -s
+
+
 BUILDS=$1
 
 dry=false

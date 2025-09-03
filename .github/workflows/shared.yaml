@@ -105,6 +105,9 @@ jobs:
       - name: Load image
         run: docker load --input /tmp/build_image.tar
 
+      - name: Create persistent image
+        run: docker create --name "build_persistent" -v "$PWD:/host" build_image:latest sleep infinity
+
       - name: Build & create releases
         env:
           JOBS: ${{ matrix.jobs }}
@@ -113,44 +116,48 @@ jobs:
         run: |
           set -uo pipefail  # no -e: keep going
           IFS=';' read -r -a jobs <<< "$JOBS"
-          failed=()
+          failed=false
+          summary=()
+
+          host_arch="$(uname -m)"
+
+          fmt_time() { date -ud "@$1" +'%Hh%Mm%Ss'; }
+
+          docker start "build_persistent" >/dev/null
 
           for job in "${jobs[@]}"; do
             [[ -z "$job" ]] && continue
 
             job_arch="${job##*.}"
-            if [[ "$job_arch" != "$(uname -m)" ]]; then
-              echo "Skipping $job (arch mismatch: host=$(uname -m), job=$job_arch)"
+            if [[ "$job_arch" != "$host_arch" ]]; then
+              echo "Skipping $job (arch mismatch: host=$host_arch, job=$job_arch)"
               continue
             fi
 
             echo "::group::Build $job"
-            if timeout 6h docker run --rm -v "$PWD:/host" build_image:latest "/host/$BUILD_SCRIPT" "$job"; then
+            SECONDS=0
+            if timeout 6h docker exec -w "/host" build_persistent "/host/$BUILD_SCRIPT" "$job"; then
               echo "::endgroup::"
               echo "::group::Release $job"
+              summary+=("✅ $job (build, $(fmt_time "$SECONDS"))")
+              SECONDS=0
               if ./action_create_release.sh "$TOKEN" "$job"; then
                 echo "Release for $job done."
+                summary+=("✅ $job (release, $(fmt_time "$SECONDS"))")
               else
                 echo "Release for $job FAILED." >&2
-                failed+=("$job (release)")
+                summary+=("❌ $job (release, $(fmt_time "$SECONDS"))")
+                failed=true
               fi
               echo "::endgroup::"
             else
               echo "::endgroup::"
               echo "Build for $job FAILED — skipping release." >&2
-              failed+=("$job (build)")
+              summary+=("❌ $job (build, $(fmt_time "$SECONDS"))")
+              failed=true
             fi
           done
 
-          if ((${#failed[@]})); then
-            {
-              echo "### Failed builds"
-              for f in "${failed[@]}"; do
-                echo "- $f"
-              done
-            } | tee -a "$GITHUB_STEP_SUMMARY"
-            echo "::error::${#failed[@]} build(s) failed: ${failed[*]}"
-            exit 1
-          else
-            echo "All builds succeeded." | tee -a "$GITHUB_STEP_SUMMARY"
-          fi
+          { for line in "${summary[@]}"; do printf '%s\n' "$line"; done; } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          $failed && echo "::error::One or more builds failed" && exit 1
