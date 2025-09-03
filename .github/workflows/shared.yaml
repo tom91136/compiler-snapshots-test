@@ -118,6 +118,12 @@ jobs:
           for job in "${jobs[@]}"; do
             [[ -z "$job" ]] && continue
 
+            job_arch="${job##*.}"
+            if [[ "$job_arch" != "$(uname -m)" ]]; then
+              echo "Skipping $job (arch mismatch: host=$(uname -m), job=$job_arch)"
+              continue
+            fi
+
             echo "::group::Build $job"
             if timeout 6h docker run --rm -v "$PWD:/host" build_image:latest "/host/$BUILD_SCRIPT" "$job"; then
               echo "::endgroup::"

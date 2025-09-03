@@ -1,31 +1,20 @@
 package uob_hpc.snapshots
 
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
-import java.nio.file.StandardOpenOption
-import java.time.Instant
-import java.time.ZoneOffset
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
-import java.time.temporal.IsoFields
-import scala.collection.immutable.ArraySeq
-import scala.collection.immutable.VectorMap
-import scala.jdk.CollectionConverters.*
-import scala.util.Try
-import scala.util.Using
-
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.errors.TransportException
-import org.eclipse.jgit.lib.Constants
-import org.eclipse.jgit.lib.ObjectId
-import org.eclipse.jgit.lib.Ref
-import org.eclipse.jgit.revwalk.RevCommit
-import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.lib.{Constants, ObjectId, Ref}
+import org.eclipse.jgit.revwalk.{RevCommit, RevWalk}
 import org.eclipse.jgit.revwalk.filter.RevFilter
 import org.eclipse.jgit.transport.TagOpt
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.treewalk.filter.PathFilter
+
+import java.nio.file.{Files, Path, Paths, StandardOpenOption}
+import java.time.{Instant, ZoneOffset, ZonedDateTime}
+import java.time.temporal.IsoFields
+import scala.collection.immutable.ArraySeq
+import scala.jdk.CollectionConverters.*
+import scala.util.{Try, Using}
 
 def writeText(xs: String, path: Path): Unit = Files.writeString(
   path,
@@ -42,6 +31,7 @@ type PIdentF[A] = PartialFunction[A, A]
 case class Config(
     name: String,
     mirror: String,
+    arches: Vector[String],
     tags: PIdentF[(String, Ref)],
     branches: PIdentF[(String, Ref)],
     filter: String => Boolean,
@@ -54,6 +44,7 @@ case class Config(
 val GCC = Config(
   name = "gcc",
   mirror = "https://github.com/gcc-mirror/gcc.git",
+  arches = Vector("x86_64", "aarch64"),
   tags = { case (s"refs/tags/basepoints/gcc-$ver", ref) => ver -> ref },
   branches = { case (s"refs/heads/releases/gcc-$ver", ref) => ver -> ref },
   filter = _.toIntOption.exists(_ >= 5)
@@ -68,6 +59,7 @@ val GCC = Config(
 val LLVM = Config(
   name = "llvm",
   mirror = "https://github.com/llvm/llvm-project.git",
+  arches = Vector("x86_64", "aarch64"),
   tags = {
     case (s"refs/tags/llvmorg-$ver-init", ref) => ver -> ref // >= 10, use explicit init tag used as basepoint
     case (s"refs/tags/llvmorg-$maj.$_.$_", ref) if maj.forall(_.isDigit) && maj.toInt < 10 =>
@@ -191,7 +183,7 @@ object Generator {
         }
         val startRef = basepointSpec.getOrElse(mergeBase(repo, head, endRef))
 
-        println(s"Basepoint=$basepointSpec ${startRef}=> Branch=$endSpec ($endRef)")
+        println(s"Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
 
         val commits =
           git
@@ -256,16 +248,12 @@ object Generator {
         reader.close()
         grouped
       }
-      .map(b =>
-        s"${b.version}.${b.date.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_DATE)}.${b.shortHash}" -> b
-      )
-      .to(VectorMap)
 
     // val releasedBuilds = fetchReleases(repoOwner, repoName).map(_.tag_name).toSet
     // XXX GH limits the release API to max 1000 entries regardless of items per page or page count
     //   To work around this, we list the Git tags which is required for a release and doesn't have
     //   arbitrary API limits.
-    val releasedBuilds = Try {
+    val releasedBuildsWithArch = Try {
       val localRepo = Git.open(Paths.get(".").toFile)
       localRepo.fetch().setTagOpt(TagOpt.FETCH_TAGS).setDepth(1).call()
       localRepo
@@ -279,14 +267,16 @@ object Generator {
       Set.empty[String]
     }.get
 
-    val missingBuilds = builds.filterNot { case (k, _) => releasedBuilds.contains(k) }
+    val missingBuilds = builds
+      .flatMap(b => config.arches.map(b.fmtWithArch(_)))
+      .filterNot(releasedBuildsWithArch.contains(_))
 
     val matrix = if (missingBuilds.nonEmpty) {
       val buildsPerJob = (missingBuilds.size.toDouble / GHAMaxJobCount).ceil.toInt
-      val jobGrouped   = missingBuilds.sliding(buildsPerJob, buildsPerJob).map(_.keys.mkString(";")).toList
-      println(s"Computed builds = ${builds.size}")
-      println(s"Released builds = ${releasedBuilds.size}")
-      println(s"Required builds = ${missingBuilds.size}")
+      val jobGrouped   = missingBuilds.grouped(buildsPerJob).map(_.mkString(";")).toList
+      println(s"Computed builds = ${builds.size} (platform independent)")
+      println(s"Released builds = ${releasedBuildsWithArch.size} (platform dependent)")
+      println(s"Required builds = ${missingBuilds.size} (platform dependent)")
       println(s"       Max jobs = $GHAMaxJobCount")
       println(s" Builds Per job = $buildsPerJob")
       println(s"     Total jobs = ${jobGrouped.size}")
@@ -295,15 +285,15 @@ object Generator {
 
     // XXX spaces break ::set-output in the action yaml for some reason, so no pretty print
     writeText(Pickler.write(matrix), Paths.get(s"matrix-${config.name}.json"))
-    writeText(Pickler.write(builds.to(Map)), Paths.get(s"builds-${config.name}.json"))
-    writeText(Pickler.write(missingBuilds.keys.toList), Paths.get(s"missing-${config.name}.json"))
+    writeText(Pickler.write(builds.map(b => b.fmtNoArch -> b).to(Map)), Paths.get(s"builds-${config.name}.json"))
+    writeText(Pickler.write(missingBuilds), Paths.get(s"missing-${config.name}.json"))
     println("Build computed")
 
     if (generateApi) {
       val parent = Files.createDirectories(Paths.get(config.name))
       println(s"Generating static APIs ($builds files) in $parent")
-      builds.foreach { case (name, b) =>
-        writeText(Pickler.write(b), parent.resolve(s"$name.json"))
+      builds.foreach { b =>
+        writeText(Pickler.write(b), parent.resolve(s"${b.fmtNoArch}.json"))
       }
       println("API generated")
     }

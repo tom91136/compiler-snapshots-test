@@ -8,7 +8,6 @@ BUILDS=$2
 # shellcheck disable=SC2206
 builds_array=(${BUILDS//;/ }) # split by ws
 
-arch=$(uname -m)
 
 gh_api() {
   local method="$1" url="$2" data="${3:-}"
@@ -27,8 +26,6 @@ gh_api() {
 
 for build in "${builds_array[@]}"; do
    
-  build_base="$build"
-  build="$build-$arch" 
   echo "Creating release: $build"
 
   build_artefact="$build.tar.xz"
@@ -36,7 +33,7 @@ for build in "${builds_array[@]}"; do
   ls -lah "$build_artefact"
 
   # make sure it's quoted, so no `-r`
-  quotedChanges=$(jq "[ .\"$build_base\" | .changes | .[] | \"[\`\(.[0])\`] \`\(.[1]/1000 | todateiso8601)\` \(.[2])\"] | join(\"\n\")" builds.json)
+  quotedChanges=$(jq "[ .\"$build\" | .changes | .[] | \"[\`\(.[0])\`] \`\(.[1]/1000 | todateiso8601)\` \(.[2])\"] | join(\"\n\")" builds.json)
 
   echo "Build  : $build"
   echo "Changes: $quotedChanges"
@@ -44,8 +41,8 @@ for build in "${builds_array[@]}"; do
   release_config=$(
     cat <<-END
 {
-  "tag_name": "$build_base",
-  "name": "$build_base",
+  "tag_name": "$build",
+  "name": "$build",
   "body": $quotedChanges,
   "draft": false,
   "prerelease": false,
@@ -57,7 +54,7 @@ END
   echo "Using release config: $release_config"
 
 
-  get_release_json=$(gh_api GET "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$build_base" || true)
+  get_release_json=$(gh_api GET "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$build" || true)
   release_id=$(echo "${get_release_json:-}" | jq -r '.id // empty')
 
   if [ -z "$release_id" ]; then
@@ -68,7 +65,7 @@ END
       # Concurrent creation: if it already exists, fetch it now
       already_exists=$(echo "$release_json" | jq -r 'select(.errors)!=null and ([.errors[].code] | index("already_exists"))')
       if [ "$already_exists" = "true" ]; then
-        get_release_json=$(gh_api GET "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$build_base" || true)
+        get_release_json=$(gh_api GET "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$build" || true)
         release_id=$(echo "${get_release_json:-}" | jq -r '.id // empty')
       fi
     fi
@@ -82,7 +79,7 @@ END
 
     echo "Release created; $release_json"
   else
-    echo "Release exists for tag '$build_base' (id=$release_id)"
+    echo "Release exists for tag '$build' (id=$release_id)"
   fi
 
 

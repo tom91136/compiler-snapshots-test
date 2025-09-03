@@ -45,8 +45,8 @@ git remote add origin https://github.com/llvm/llvm-project.git
 git config --local gc.auto 0
 
 for build in "${builds_array[@]}"; do
-  dest_dir="/tmp/$build-$(uname -m)"
-  dest_archive="/host/$build-$(uname -m).tar.xz"
+  dest_dir="/tmp/$build"
+  dest_archive="/host/$build.tar.xz"
 
   hash=$(jq -r ".\"$build\" | .hash" "/host/builds.json")
 
@@ -54,7 +54,7 @@ for build in "${builds_array[@]}"; do
   # CMake < 3.17 due to a bug in LLVM's ExternalProjectAdd.
   TGT_FIX=7f5fe30a150e7e87d3fbe4da4ab0e76ec38b40b9
 
-  echo "Build   : $build-$(uname -m)"
+  echo "Build   : $build"
   echo "Commit  : $hash"
 
   git -c protocol.version=2 fetch \
@@ -97,7 +97,7 @@ for build in "${builds_array[@]}"; do
   if $dry; then
     echo "Dry run, creating dummy artefact..."
     mkdir -p "$dest_dir"
-    echo "$build-$(uname -m)" >"$dest_dir/data.txt"
+    echo "$build" >"$dest_dir/data.txt"
   else
 
     pwd
@@ -106,10 +106,10 @@ for build in "${builds_array[@]}"; do
     rm -rf build
     mkdir -p build
 
-    install_dir="$dest_dir/opt/$build-$(uname -m)"
+    install_dir="$dest_dir/opt/$build"
     mkdir -p "$install_dir"
 
-    flags="-g1 -gz -fno-omit-frame-pointer"
+    flags="-g1 -gz=zlib -fno-omit-frame-pointer -gno-column-info -femit-struct-debug-reduced"
 
     {
 

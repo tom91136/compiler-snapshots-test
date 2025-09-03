@@ -19,8 +19,8 @@ git remote add origin https://github.com/gcc-mirror/gcc.git
 git config --local gc.auto 0
 
 for build in "${builds_array[@]}"; do
-  dest_dir="/tmp/$build-$(uname -m)"
-  dest_archive="/host/$build-$(uname -m).tar.xz"
+  dest_dir="/tmp/$build"
+  dest_archive="/host/$build.tar.xz"
 
   hash=$(jq -r ".\"$build\" | .hash" "/host/builds.json")
 
@@ -28,7 +28,7 @@ for build in "${builds_array[@]}"; do
   # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113181
   SAN_FIX=d5ca27efb4b69f8fdf38240ad62cc1af30a30f77
 
-  echo "Build   : $build-$(uname -m)"
+  echo "Build   : $build"
   echo "Commit  : $hash"
 
   git -c protocol.version=2 fetch \
@@ -68,7 +68,7 @@ for build in "${builds_array[@]}"; do
   if $dry; then
     echo "Dry run, creating dummy artefact..."
     mkdir -p "$dest_dir"
-    echo "$build-$(uname -m)" >"$dest_dir/data.txt"
+    echo "$build" >"$dest_dir/data.txt"
   else
 
     pwd
@@ -77,10 +77,10 @@ for build in "${builds_array[@]}"; do
     rm -rf build
     mkdir -p build
 
-    install_dir="$dest_dir/opt/$build-$(uname -m)"
+    install_dir="$dest_dir/opt/$build"
     mkdir -p "$install_dir"
 
-    flags="-O2 -g1 -gz -fno-omit-frame-pointer"
+    flags="-O2 -g1 -gz=zlib -fno-omit-frame-pointer -gno-column-info -femit-struct-debug-reduced"
 
     {
 
@@ -90,7 +90,7 @@ for build in "${builds_array[@]}"; do
       ../configure \
         CXXFLAGS="$flags" \
         CFLAGS="$flags -Wno-error=incompatible-pointer-types -Wno-maybe-uninitialized" \
-        --prefix="/opt/$build-$(uname -m)" \
+        --prefix="/opt/$build" \
         --enable-languages=c,c++,fortran \
         --disable-nls \
         --disable-bootstrap \

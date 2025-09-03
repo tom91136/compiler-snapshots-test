@@ -1,40 +1,26 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-set -eu
+PARALLEL=${PARALLEL:-8}
+MAX_RELEASES=${MAX_RELEASES:-32768}
 
-token="$GITHUB_TOKEN"
-repo="$GITHUB_REPOSITORY"
-prefix="*" # llvm-* | gcc-*
+echo "Enumerating releases..."
 
-if ! command -v jq &>/dev/null; then
-  echo "jq is required to delete releases"
-  exit 1
+mapfile -t TAGS < <(gh release list --limit "$MAX_RELEASES" --json tagName \
+  --template '{{range .}}{{.tagName}}{{"\n"}}{{end}}')
+
+COUNT=${#TAGS[@]}
+if (( COUNT == 0 )); then
+  echo "No releases found."
+  exit 0
 fi
 
-if ! command -v curl &>/dev/null; then
-  echo "curl is required to delete releases"
-  exit 1
-fi
+read -r -p "Found ${COUNT} releases, delete all? (parallel=${PARALLEL}) [y/N]" ans
+case "${ans}" in
+  y|Y|yes|YES) ;;
+  *) echo "Aborted."; exit 1;;
+esac
 
-tags=$(git tag -l "$prefix")
-# shellcheck disable=SC2086
-git push -d origin $tags
-# shellcheck disable=SC2046
-git tag -d $(git tag -l "$prefix")
+printf '%s\0' "${TAGS[@]}" | xargs -0 -n1 -P"${PARALLEL}" -I{} gh release delete -y '{}' --cleanup-tag
 
-for tag in "${tags[@]}"; do
-  id=$(curl -s \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: Bearer $token" \
-    "https://api.github.com/repos/$repo/releases/tags/$tag" | jq .id)
-
-  echo "$tag => $id"
-  curl \
-    -X DELETE \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: Bearer $token" \
-    "https://api.github.com/repos/$repo/releases/$id" &
-
-done
-
-echo "Deleted ${#tags[@]} entries"
+echo "Done."

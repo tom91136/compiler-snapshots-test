@@ -19,9 +19,9 @@ import uob_hpc.snapshots.Pickler.*
 
 object WebApp {
 
-  case class Index(build: Option[String] = None) derives ReadWriter
+  private case class Index(build: Option[String] = None) derives ReadWriter
 
-  object router extends Router[Index](
+  private object router extends Router[Index](
         routes = List(
           Route.onlyFragment[Index, Option[String]](
             _.build,
@@ -47,13 +47,13 @@ object WebApp {
 
   @JSImport("bulma/css/bulma.min.css", JSImport.Namespace)
   @js.native
-  object Bulma extends js.Object
+  private object Bulma extends js.Object
 
   @JSImport("@fortawesome/fontawesome-free/css/all.css", JSImport.Namespace)
   @js.native
-  object FontAwesomeCSS extends js.Object
+  private object FontAwesomeCSS extends js.Object
 
-  enum Compiler(val repo: String) {
+  private enum Compiler(val repo: String) {
     case GCC  extends Compiler("gcc-mirror/gcc")
     case LLVM extends Compiler("llvm/llvm-project")
   }
@@ -63,7 +63,7 @@ object WebApp {
     // XXX keep a reference to these
     val _ = (Bulma, FontAwesomeCSS)
 
-    val lut      = Var[Map[String, (String, Build, Compiler)]](Map.empty)
+    val lut      = Var[Map[String, (Build, Compiler)]](Map.empty)
     val builds   = Compiler.values.map(_ -> Var[Deferred[Map[String, Build]]](Deferred.Pending)).toMap
     val missings = Compiler.values.map(_ -> Var[Deferred[ArraySeq[String]]](Deferred.Pending)).toMap
 
@@ -72,7 +72,7 @@ object WebApp {
         builds(c).set(x match {
           case Failure(e)  => Deferred.Error(e)
           case Success(xs) =>
-            lut.update(_ ++ xs.map(x => x._1 -> (x._1, x._2, c)))
+            lut.update(_ ++ xs.map((key, build) => key -> (build, c)))
             Deferred.Success(xs)
         })
       )
@@ -199,7 +199,7 @@ object WebApp {
                         element <- Option(ctx.thisNode.ref.parentElement.querySelector(s"""[name="$key"]"""))
                       } {
                         element.scrollIntoView()
-                        lut.signal.foreach(_.get(key).foreach { case (_, _, c) => compiler.set(c) })(using ctx.owner)
+                        lut.signal.foreach(_.get(key).foreach { case (_, c) => compiler.set(c) })(using ctx.owner)
                       }
                     }
                   )
@@ -234,10 +234,9 @@ object WebApp {
               case (Index(None), _)      => span("Select a build for details")
               case (Index(Some(x)), lut) =>
                 lut.get(x) match {
-                  case None if lut.isEmpty           => span(s"Loading")
-                  case None                          => span(s"Build \"$x\" not found")
-                  case Some((name, build, compiler)) =>
-
+                  case None if lut.isEmpty     => span(s"Loading")
+                  case None                    => span(s"Build \"$x\" not found")
+                  case Some((build, compiler)) =>
                     div(
                       overflow.hidden,
                       height.percent := 100,
@@ -256,12 +255,17 @@ object WebApp {
                             )
                           ),
                           tr(
-                            td("Download"),
+                            td("Binaries"),
                             td(
-                              a(
-                                s"$name.tar.xz",
-                                href := s"https://github.com/$repo/releases/download/$name/$name.tar.xz"
-                              )
+                              Vector("x86_64", "aarch64").map { arch =>
+                                val key = build.fmtWithArch(arch)
+                                p(
+                                  a(
+                                    s"$key.tar.xz",
+                                    href := s"https://github.com/$repo/releases/download/$key/$key.tar.xz"
+                                  )
+                                )
+                              }
                             )
                           )
                         )
