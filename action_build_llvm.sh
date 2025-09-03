@@ -158,9 +158,13 @@ for build in "${builds_array[@]}"; do
 
   fi
 
-  XZ_OPT='-T0 -9e --block-size=16MiB' tar cfJ "$dest_archive" --checkpoint=.1000 --totals --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -C "$dest_dir" .
+  time XZ_OPT='-T0 -9e --block-size=16MiB' tar cfJ "$dest_archive" --checkpoint=.1000 --totals --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -C "$dest_dir" .
 
+  echo ""
   du -sh "$dest_dir"
   du -sh "$dest_archive"
+
+  rm -rf "$dest_dir"
+  ccache -s
 
 done

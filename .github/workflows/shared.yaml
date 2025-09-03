@@ -160,4 +160,6 @@ jobs:
 
           { for line in "${summary[@]}"; do printf '%s\n' "$line"; done; } | tee -a "$GITHUB_STEP_SUMMARY"
 
-          $failed && echo "::error::One or more builds failed" && exit 1
+          if [ "$failed" = true ]; then
+            echo "::error::One or more builds failed" && exit 1
+          fi
