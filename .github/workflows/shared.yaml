@@ -139,7 +139,7 @@ jobs:
             if timeout 6h docker exec -w "/host" build_persistent "/host/$BUILD_SCRIPT" "$job"; then
               echo "::endgroup::"
               echo "::group::Release $job"
-              summary+=("✅ $job (build, $(fmt_time "$SECONDS"))")
+              summary+=("✅ $job (build  , $(fmt_time "$SECONDS"))")
               SECONDS=0
               if ./action_create_release.sh "$TOKEN" "$job"; then
                 echo "Release for $job done."
@@ -153,7 +153,7 @@ jobs:
             else
               echo "::endgroup::"
               echo "Build for $job FAILED — skipping release." >&2
-              summary+=("❌ $job (build, $(fmt_time "$SECONDS"))")
+              summary+=("❌ $job (build  , $(fmt_time "$SECONDS"))")
               failed=true
             fi
           done

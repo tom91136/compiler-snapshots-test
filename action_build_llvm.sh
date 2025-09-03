@@ -8,10 +8,6 @@ set -u
 
 export PATH="/usr/lib64/ccache${PATH:+:${PATH}}"
 
-for exe in gcc g++ cc c++; do
-  ln -sf "/usr/bin/ccache" "/usr/local/bin/$exe"
-done
-
 ccache -M 10G
 ccache -s
 
@@ -48,9 +44,16 @@ build_cmake(){
   eval "cmake3() { \"$prefix/bin/cmake\" \"\$@\"; }"
 }
 
-git init llvm
+if [ ! -d llvm/.git ]; then
+  rm -rf llvm
+  git init llvm
+fi
 cd llvm
-git remote add origin https://github.com/llvm/llvm-project.git
+if git remote get-url origin &>/dev/null; then
+  git remote set-url origin https://github.com/llvm/llvm-project.git
+else
+  git remote add origin https://github.com/llvm/llvm-project.git
+fi
 git config --local gc.auto 0
 
 for build in "${builds_array[@]}"; do
@@ -124,6 +127,8 @@ for build in "${builds_array[@]}"; do
     {
 
     time \
+    CMAKE_C_COMPILER_LAUNCHER=ccache \
+    CMAKE_CXX_COMPILER_LAUNCHER=ccache \
     CFLAGS="$flags" \
     CXXFLAGS="$flags -include cstdint -include cstdlib -include string -include cstdio -Wno-template-id-cdtor -Wno-missing-template-keyword -Wno-attributes -Wno-maybe-uninitialized" \
       cmake3 -S llvm -B build \

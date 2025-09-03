@@ -8,13 +8,8 @@ set -u
 
 export PATH="/usr/lib64/ccache${PATH:+:${PATH}}"
 
-for bin in gcc g++ cc c++; do
-  ln -sf "/usr/bin/ccache" "/usr/local/bin/$bin"
-done
-
 ccache -M 10G
 ccache -s
-
 
 BUILDS=$1
 
@@ -23,9 +18,16 @@ dry=false
 # shellcheck disable=SC2206
 builds_array=(${BUILDS//;/ }) # split by ws
 
-git init gcc
+if [ ! -d gcc/.git ]; then
+  rm -rf gcc
+  git init gcc
+fi
 cd gcc
-git remote add origin https://github.com/gcc-mirror/gcc.git
+if git remote get-url origin &>/dev/null; then
+  git remote set-url origin https://github.com/gcc-mirror/gcc.git
+else
+  git remote add origin https://github.com/gcc-mirror/gcc.git
+fi
 git config --local gc.auto 0
 
 for build in "${builds_array[@]}"; do
@@ -99,6 +101,8 @@ for build in "${builds_array[@]}"; do
     (
       cd build
       ../configure \
+        CXX="ccache c++" \
+        CC="ccache cc" \
         CXXFLAGS="$flags" \
         CFLAGS="$flags -Wno-error=incompatible-pointer-types -Wno-maybe-uninitialized" \
         --prefix="/opt/$build" \
