@@ -120,6 +120,7 @@ for build in "${builds_array[@]}"; do
       cmake3 -S llvm -B build \
       -DCMAKE_BUILD_TYPE=Release \
       -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
       -DLLVM_LINK_LLVM_DYLIB=ON \
       -DLLVM_BUILD_LLVM_DYLIB=ON \
       -DLLVM_ENABLE_PROJECTS="clang;lld;openmp;pstl" \

@@ -230,7 +230,7 @@ object Generator {
                 commits.dropWhile(_ != x).takeWhile(_ != c).reverse.to(ArraySeq).map { c =>
                   val hash    = reader.abbreviate(c).name()
                   val date    = c.getCommitterIdent.getWhenAsInstant
-                  val message = c.getShortMessage.replace("\n", "\\n")
+                  val message = c.getShortMessage.replace("\n", "\\n").replace("`", "\\`")
                   (hash, date, message)
                 }
             }
@@ -291,7 +291,7 @@ object Generator {
 
     if (generateApi) {
       val parent = Files.createDirectories(Paths.get(config.name))
-      println(s"Generating static APIs ($builds files) in $parent")
+      println(s"Generating static APIs (${builds.size} entries) in $parent")
       builds.foreach { b =>
         writeText(Pickler.write(b), parent.resolve(s"${b.fmtNoArch}.json"))
       }
