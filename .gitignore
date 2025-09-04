@@ -31,8 +31,12 @@ metals.sbt
 .idea_modules
 /.worksheet/
 
+matrix-*.json
 matrix.json
+builds-*.json
 builds.json
+missing-*.json
+missing.json
 *-bare/
 
 docs/

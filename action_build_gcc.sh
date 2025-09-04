@@ -30,16 +30,45 @@ else
 fi
 git config --local gc.auto 0
 
+git_is_ancestor() {
+  local base="$1"
+  local hash="$2"
+
+  if git merge-base --is-ancestor "$base" "$hash"; then return 1
+  else
+    rc=$?
+    if [ "$rc" -eq 1 ]; then return 0
+    else
+      echo "Unable to determine ancestry (git merge-base failed with code $rc); assuming fix present." >&2
+      return 1
+    fi
+  fi
+}
+
+
 for build in "${builds_array[@]}"; do
   dest_dir="/tmp/$build"
   dest_archive="/host/$build.tar.xz"
 
   build_no_arch="${build%.*}"
-  hash=$(jq -r ".\"$build_no_arch\" | .hash" "/host/builds.json")
+  builds_json="/host/builds.json"
+  [ -f "/host/builds-gcc.json" ] && builds_json="/host/builds-gcc.json"
+  hash=$(jq -r ".\"$build_no_arch\" | .hash" "$builds_json")
 
   # Commits before d5ca27efb4b69f8fdf38240ad62cc1af30a30f77 requires an old glibc for asan to work
   # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113181
   SAN_FIX=d5ca27efb4b69f8fdf38240ad62cc1af30a30f77
+
+
+  # Commits before 1a8be74612e0ab0f149f7f843603a8b48ae2843f has incompatibilities with newer (>=2.28?) glibc
+  # see https://github.com/gcc-mirror/gcc/commit/1a8be74612e0ab0f149f7f843603a8b48ae2843f
+  # We also use alternative flags as C/C++ defaults at the time is different
+  UCTX_FIX="1a8be74612e0ab0f149f7f843603a8b48ae2843f"
+
+  # Commits before d68244487a4a370c727befee4dc8488e4794a2db has busted syntax that cases 
+  # "too many template-parameter-lists" 
+  # see https://github.com/gcc-mirror/gcc/commit/d68244487a4a370c727befee4dc8488e4794a2db
+  WINT_FIX="d68244487a4a370c727befee4dc8488e4794a2db"
 
   echo "Build   : $build"
   echo "Commit  : $hash"
@@ -56,25 +85,6 @@ for build in "${builds_array[@]}"; do
   git checkout -f -q "$hash"
   git clean -fdx
 
-  has_san_fix=0
-  if git merge-base --is-ancestor "$SAN_FIX" "$hash"; then
-    has_san_fix=0
-  else
-    rc=$?
-    if [ "$rc" -eq 1 ]; then
-      has_san_fix=1
-    else
-      echo "Unable to determine ancestry (git merge-base failed with code $rc); assuming fix present."
-      has_san_fix=0
-    fi
-  fi
-
-  if [ "$has_san_fix" -ne 0 ]; then
-    extra="--disable-libsanitizer"
-  else
-    echo "Commit does not require disabling ASAN support, continuing..."
-    extra=""
-  fi
 
   echo "Source cloned, starting build step..."
 
@@ -95,6 +105,74 @@ for build in "${builds_array[@]}"; do
 
     flags="-O2 -g1 -gz=zlib -fno-omit-frame-pointer -gno-column-info -femit-struct-debug-reduced"
 
+    if git_is_ancestor "$SAN_FIX" "$hash"; then
+      extra+=("--disable-libsanitizer")
+    else
+      echo "Commit does not require disabling ASAN support, continuing..."
+       
+    fi
+
+    if git_is_ancestor "$UCTX_FIX" "$hash"; then
+      for arch in i386 aarch64; do
+        sed -i 's/\bstruct[[:space:]]\+ucontext\b/ucontext_t/g' libgcc/config/$arch/linux-unwind.h
+      done
+      extra+=(CXXFLAGS_FOR_TARGET="-O2 -g1" CFLAGS_FOR_TARGET="-O2 -g1")
+      extra+=(CXX="ccache c++ -std=gnu++98")
+      extra+=(CC="ccache cc -std=gnu89 -Wno-implicit-int -Wno-implicit-function-declaration")
+    else
+      echo "Commit does not require ucontext patch and alternative std flags, continuing..."
+    fi
+
+#     if git_is_ancestor "$WINT_FIX" "$hash"; then
+# cat <<'PATCH' | git apply --ignore-space-change --reject -p1
+# diff --git a/gcc/wide-int.h b/gcc/wide-int.h
+# --- a/gcc/wide-int.h
+# +++ b/gcc/wide-int.h
+# @@ -1,3 +1,2 @@
+# -  template <>
+#    template <typename T1, typename T2>
+#    struct binary_traits <T1, T2, FLEXIBLE_PRECISION, FLEXIBLE_PRECISION>
+# @@ -1,3 +1,2 @@
+# -  template <>
+#    template <typename T1, typename T2>
+#    struct binary_traits <T1, T2, FLEXIBLE_PRECISION, VAR_PRECISION>
+# @@ -1,3 +1,2 @@
+# -  template <>
+#    template <typename T1, typename T2>
+#    struct binary_traits <T1, T2, FLEXIBLE_PRECISION, CONST_PRECISION>
+# @@ -1,3 +1,2 @@
+# -  template <>
+#    template <typename T1, typename T2>
+#    struct binary_traits <T1, T2, VAR_PRECISION, FLEXIBLE_PRECISION>
+# @@ -1,3 +1,2 @@
+# -  template <>
+#    template <typename T1, typename T2>
+#    struct binary_traits <T1, T2, CONST_PRECISION, FLEXIBLE_PRECISION>
+# @@ -1,3 +1,2 @@
+# -  template <>
+#    template <typename T1, typename T2>
+#    struct binary_traits <T1, T2, CONST_PRECISION, CONST_PRECISION>
+# @@ -1,3 +1,2 @@
+# -  template <>
+#    template <typename T1, typename T2>
+#    struct binary_traits <T1, T2, VAR_PRECISION, VAR_PRECISION>
+# @@ -1,3 +1,2 @@
+# -  template <>
+#    template <typename storage>
+#    struct int_traits < generic_wide_int <storage> >
+# @@ -1,3 +1,2 @@
+# -  template <>
+#    template <bool SE>
+#    struct int_traits <wide_int_ref_storage <SE> >
+# @@ -1,3 +1,2 @@
+# -  template <>
+#    template <int N>
+#    struct int_traits < fixed_wide_int_storage <N> >
+# PATCH
+#     else
+#       echo "Commit does not require wide-int patch, continuing..."
+#     fi
+
     {
 
     time ./contrib/download_prerequisites --no-isl --no-verify
@@ -112,7 +190,7 @@ for build in "${builds_array[@]}"; do
         --disable-multilib \
         --disable-libvtv \
         --without-isl \
-        $extra
+        "${extra[@]}"
     )
     time make --silent -C build -j "$(nproc)"
     time make --silent -C build -j "$(nproc)" install DESTDIR="$dest_dir"

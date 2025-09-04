@@ -36,7 +36,7 @@ build_cmake(){
     cd "$src_dir"
     ./bootstrap --prefix="$prefix"
     make -j "$(nproc)"
-    make install DESTDIR
+    make install
     cd "$workdir"
     rm -rf "$src_dir" "$src_tar"
   fi
@@ -60,8 +60,13 @@ for build in "${builds_array[@]}"; do
   dest_dir="/tmp/$build"
   dest_archive="/host/$build.tar.xz"
 
+
+
   build_no_arch="${build%.*}"
-  hash=$(jq -r ".\"$build_no_arch\" | .hash" "/host/builds.json")
+
+  builds_json="/host/builds.json"
+  [ -f "/host/builds-llvm.json" ] && builds_json="/host/builds-llvm.json"
+  hash=$(jq -r ".\"$build_no_arch\" | .hash" "$builds_json")
 
   # Commits before https://github.com/llvm/llvm-project/commit/7f5fe30a150e will only work with
   # CMake < 3.17 due to a bug in LLVM's ExternalProjectAdd.
