@@ -24,7 +24,7 @@ def writeText(xs: String, path: Path): Unit = Files.writeString(
   StandardOpenOption.WRITE
 ): Unit
 
-final val GHAMaxJobCount = 256
+final val GHAMaxJobCount = 128
 
 type PIdentF[A] = PartialFunction[A, A]
 
