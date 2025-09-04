@@ -63,9 +63,10 @@ jobs:
 
       - name: Set output
         id: set-builds
-        run: |
-          builds=$(jq -c '.[-30:]' matrix-${{ inputs.config }}.json)
-          echo "builds=$builds" >> $GITHUB_OUTPUT
+        run: echo "builds=$(cat matrix-${{ inputs.config }}.json)" >> $GITHUB_OUTPUT
+        # run: |
+        #   builds=$(jq -c '.[-30:]' matrix-${{ inputs.config }}.json)
+        #   echo "builds=$builds" >> $GITHUB_OUTPUT
 
       - name: Save build artefact
         uses: actions/upload-artifact@v4

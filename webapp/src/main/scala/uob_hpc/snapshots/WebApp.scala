@@ -1,21 +1,19 @@
 package uob_hpc.snapshots
 
-import java.time.Instant
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
-import scala.collection.immutable.ArraySeq
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.scalajs.js
-import scala.scalajs.js.annotation.JSImport
-import scala.util.Failure
-import scala.util.Success
-
 import com.raquo.airstream.state.Var
 import com.raquo.laminar.api.L.*
 import com.raquo.waypoint.*
 import org.scalajs.dom
 import org.scalajs.dom.window
 import uob_hpc.snapshots.Pickler.*
+
+import java.time.{Instant, ZoneOffset}
+import java.time.format.DateTimeFormatter
+import scala.collection.immutable.ArraySeq
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.scalajs.js
+import scala.scalajs.js.annotation.JSImport
+import scala.util.{Failure, Success}
 
 object WebApp {
 
@@ -64,6 +62,7 @@ object WebApp {
     val _ = (Bulma, FontAwesomeCSS)
 
     val lut      = Var[Map[String, (Build, Compiler)]](Map.empty)
+    val archs    = Vector("x86_64", "aarch64")
     val builds   = Compiler.values.map(_ -> Var[Deferred[Map[String, Build]]](Deferred.Pending)).toMap
     val missings = Compiler.values.map(_ -> Var[Deferred[ArraySeq[String]]](Deferred.Pending)).toMap
 
@@ -99,6 +98,11 @@ object WebApp {
 	  |.missing-row {
       |  color: white !important;
       |  background-color: #f14668;
+      |}
+	  |
+	  |.missing-partial-row {
+      |  color: white !important;
+      |  background-color: #f1c946;
       |}
       |
       |.extra-intro {
@@ -138,8 +142,9 @@ object WebApp {
                 cls("is-active") <-- compiler.signal.map(_ == c),
                 a(
                   child.text <-- missings(c).signal.combineWith(builds(c).signal).map {
-                    case (Deferred.Success(ys), Deferred.Success(xs)) => s"$c (${xs.size - ys.size})"
-                    case _                                            => s"$c"
+                    case (Deferred.Success(missing), Deferred.Success(total)) =>
+                      s"$c (${(total.size * archs.size) - missing.size})"
+                    case _ => s"$c"
                   },
                   onClick.mapTo(c) --> compiler.writer
                 )
@@ -165,32 +170,37 @@ object WebApp {
               height.percent := 100,
               display <-- compiler.signal.map(_ == c).map(if (_) "block" else "none"),
               children <-- missings(c).signal.combineWith(builds(c).signal, filter.signal).map {
-                case (Deferred.Error(e), _, _)                        => Seq(span(e.stackTraceAsString))
-                case (_, Deferred.Error(e), _)                        => Seq(span(e.stackTraceAsString))
-                case (Deferred.Success(ys), Deferred.Success(xs), kw) =>
-                  val missings = ys.toSet
-                  xs.to(ArraySeq)
-                    .filter { case (_, build) =>
+                case (Deferred.Error(e), _, _)                                  => Seq(span(e.stackTraceAsString))
+                case (_, Deferred.Error(e), _)                                  => Seq(span(e.stackTraceAsString))
+                case (Deferred.Success(missings), Deferred.Success(builds), kw) =>
+                  val missingSet = missings.toSet
+                  builds.values
+                    .to(ArraySeq)
+                    .filter { build =>
                       if (kw.isBlank) true
                       else build.hash.contains(kw) || build.isoDate.contains(kw) || build.version.contains(kw)
                     }
-                    .sortBy(x => x._2.date -> x._2.version)(using Ordering[(Instant, String)].reverse)
-                    .map { case (key, x) =>
-                      val selected = sig.map(_.build.contains(key))
+                    .sortBy(build => build.date -> build.version)(using Ordering[(Instant, String)].reverse)
+                    .map { build =>
+                      val selected = sig.map(_.build.contains(build.fmtNoArch))
+                      val expected = archs.map(build.fmtWithArch(_)).toSet
                       a(
-                        if (!missings.contains(key)) navigateTo(Index(Some(key)))
-                        else cls := "missing-row",
+                        missingSet.intersect(expected) match {
+                          case ms if ms.isEmpty     => navigateTo(Index(Some(build.fmtNoArch)))
+                          case ms if ms == expected => cls := "missing-row"         // all missing
+                          case _                    => cls := "missing-partial-row" // partial missing
+                        },
                         cls("highlight-row is-active") <-- selected,
                         cls      := "panel-block",
-                        nameAttr := key,
+                        nameAttr := build.fmtNoArch,
                         span(cls := "panel-icon", i(cls := "fas fa-file-archive ", dataAttr("aria-hidden") := "true")),
                         fontFamily := "monospace",
-                        s"[${x.shortHash}]",
-                        span(cls := "tag is-info", s"${x.isoDate}"),
+                        s"[${build.shortHash}]",
+                        span(cls := "tag is-info", s"${build.isoDate}"),
                         nbsp,
-                        span(cls := "tag is-primary", s"${x.version}"),
+                        span(cls := "tag is-primary", s"${build.version}"),
                         nbsp,
-                        span(cls := "tag is-success", s"+${x.changes.size}")
+                        span(cls := "tag is-success", s"+${build.changes.size}")
                       )
                     } :+ div(
                     onMountCallback { ctx =>
@@ -257,7 +267,7 @@ object WebApp {
                           tr(
                             td("Binaries"),
                             td(
-                              Vector("x86_64", "aarch64").map { arch =>
+                              archs.map { arch =>
                                 val key = build.fmtWithArch(arch)
                                 p(
                                   a(
