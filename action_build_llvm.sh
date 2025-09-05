@@ -163,11 +163,16 @@ for build in "${builds_array[@]}"; do
       '\\[\\&CGF, Device, \\&Info\\]\\(CodeGenFunction \\&CGF,'
       '\\[\\&D, \\&CGF, Device, \\&Info, \\&CodeGen, \\&NoPrivAction\\]'
       '\\[\\&D, \\&CGF, Device\\]\\(CodeGenFunction \\&CGF, PrePostActionTy \\&\\)'
+      '\\[\\&D, \\&CGF, \\&BasePointersArray, \\&PointersArray,'
+      '\\[\\&CGF, \\&BasePointersArray, \\&PointersArray, \\&SizesArray,'
+
     )
     reps=(
       '[Device, \\&Info](CodeGenFunction \\&CGF,'
       '[\\&D, Device, \\&Info, \\&CodeGen, \\&NoPrivAction]'
       '[\\&D, Device](CodeGenFunction \\&CGF, PrePostActionTy \\&)'
+      '[\\&D, \\&BasePointersArray, \\&PointersArray,'
+      '[\\&BasePointersArray, \\&PointersArray, \\&SizesArray,'
     )
     
     for i in "${!pats[@]}"; do
@@ -216,7 +221,17 @@ for build in "${builds_array[@]}"; do
 
     flags="-g1 -gz=zlib -fno-omit-frame-pointer -gno-column-info -femit-struct-debug-reduced"
 
-    project_to_build="$(filter_cmake_list "clang;lld;openmp;pstl" "%%/CMakeLists.txt")"
+    broken_pstl=false
+    if [[ ! -f pstl/CMakeLists.txt ]]; then
+        broken_pstl=true
+    elif grep -q 'set(PARALLELSTL_BACKEND "tbb" CACHE STRING "Threading backend; defaults to TBB")' pstl/CMakeLists.txt; then
+        broken_pstl=true
+    fi
+
+    working_projects="clang;lld;openmp"
+    if [[ "$broken_pstl" == false ]]; then working_projects="$working_projects;pstl"; fi
+
+    project_to_build="$(filter_cmake_list "$working_projects" "%%/CMakeLists.txt")"
     echo "Using project list: $project_to_build"
 
     arch_to_build="$(filter_cmake_list "X86;AArch64;NVPTX;AMDGPU" "llvm/lib/Target/%%/CMakeLists.txt")"
