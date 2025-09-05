@@ -8,6 +8,7 @@ set -u
 
 export PATH="/usr/lib64/ccache${PATH:+:${PATH}}"
 
+ccache --set-config=sloppiness=locale,time_macros
 ccache -M 10G
 ccache -s
 
@@ -80,7 +81,7 @@ for build in "${builds_array[@]}"; do
     --progress \
     --no-recurse-submodules \
     --filter=blob:none \
-    origin "$hash" "$SAN_FIX"
+    origin "$hash" "$SAN_FIX" "$UCTX_FIX" "$WINT_FIX"
 
   git checkout -f -q "$hash"
   git clean -fdx
@@ -109,12 +110,18 @@ for build in "${builds_array[@]}"; do
       extra+=("--disable-libsanitizer")
     else
       echo "Commit does not require disabling ASAN support, continuing..."
-       
     fi
 
     if git_is_ancestor "$UCTX_FIX" "$hash"; then
       for arch in i386 aarch64; do
-        sed -i 's/\bstruct[[:space:]]\+ucontext\b/ucontext_t/g' libgcc/config/$arch/linux-unwind.h
+        f="libgcc/config/$arch/linux-unwind.h"
+        echo "Patching $f"
+        awk '{
+          o=$0
+          gsub(/\<struct[[:space:]]+ucontext\>/,"ucontext_t")
+          if($0!=o) c=1
+          print
+        } END{ if(!c) exit 3 }' "$f" >tmp && mv tmp "$f"
       done
       extra+=(CXXFLAGS_FOR_TARGET="-O2 -g1" CFLAGS_FOR_TARGET="-O2 -g1")
       extra+=(CXX="ccache c++ -std=gnu++98")
@@ -123,55 +130,39 @@ for build in "${builds_array[@]}"; do
       echo "Commit does not require ucontext patch and alternative std flags, continuing..."
     fi
 
-#     if git_is_ancestor "$WINT_FIX" "$hash"; then
-# cat <<'PATCH' | git apply --ignore-space-change --reject -p1
-# diff --git a/gcc/wide-int.h b/gcc/wide-int.h
-# --- a/gcc/wide-int.h
-# +++ b/gcc/wide-int.h
-# @@ -1,3 +1,2 @@
-# -  template <>
-#    template <typename T1, typename T2>
-#    struct binary_traits <T1, T2, FLEXIBLE_PRECISION, FLEXIBLE_PRECISION>
-# @@ -1,3 +1,2 @@
-# -  template <>
-#    template <typename T1, typename T2>
-#    struct binary_traits <T1, T2, FLEXIBLE_PRECISION, VAR_PRECISION>
-# @@ -1,3 +1,2 @@
-# -  template <>
-#    template <typename T1, typename T2>
-#    struct binary_traits <T1, T2, FLEXIBLE_PRECISION, CONST_PRECISION>
-# @@ -1,3 +1,2 @@
-# -  template <>
-#    template <typename T1, typename T2>
-#    struct binary_traits <T1, T2, VAR_PRECISION, FLEXIBLE_PRECISION>
-# @@ -1,3 +1,2 @@
-# -  template <>
-#    template <typename T1, typename T2>
-#    struct binary_traits <T1, T2, CONST_PRECISION, FLEXIBLE_PRECISION>
-# @@ -1,3 +1,2 @@
-# -  template <>
-#    template <typename T1, typename T2>
-#    struct binary_traits <T1, T2, CONST_PRECISION, CONST_PRECISION>
-# @@ -1,3 +1,2 @@
-# -  template <>
-#    template <typename T1, typename T2>
-#    struct binary_traits <T1, T2, VAR_PRECISION, VAR_PRECISION>
-# @@ -1,3 +1,2 @@
-# -  template <>
-#    template <typename storage>
-#    struct int_traits < generic_wide_int <storage> >
-# @@ -1,3 +1,2 @@
-# -  template <>
-#    template <bool SE>
-#    struct int_traits <wide_int_ref_storage <SE> >
-# @@ -1,3 +1,2 @@
-# -  template <>
-#    template <int N>
-#    struct int_traits < fixed_wide_int_storage <N> >
-# PATCH
-#     else
-#       echo "Commit does not require wide-int patch, continuing..."
-#     fi
+    if git_is_ancestor "$WINT_FIX" "$hash"; then
+      f="gcc/wide-int.h"
+      echo "Patching $f"
+      anchors=(
+        '^[[:space:]]*struct[[:space:]]+binary_traits[[:space:]]*<T1,[[:space:]]*T2,[[:space:]]*FLEXIBLE_PRECISION,[[:space:]]*FLEXIBLE_PRECISION>[[:space:]]*$'
+        '^[[:space:]]*struct[[:space:]]+binary_traits[[:space:]]*<T1,[[:space:]]*T2,[[:space:]]*FLEXIBLE_PRECISION,[[:space:]]*VAR_PRECISION>[[:space:]]*$'
+        '^[[:space:]]*struct[[:space:]]+binary_traits[[:space:]]*<T1,[[:space:]]*T2,[[:space:]]*FLEXIBLE_PRECISION,[[:space:]]*CONST_PRECISION>[[:space:]]*$'
+        '^[[:space:]]*struct[[:space:]]+binary_traits[[:space:]]*<T1,[[:space:]]*T2,[[:space:]]*VAR_PRECISION,[[:space:]]*FLEXIBLE_PRECISION>[[:space:]]*$'
+        '^[[:space:]]*struct[[:space:]]+binary_traits[[:space:]]*<T1,[[:space:]]*T2,[[:space:]]*CONST_PRECISION,[[:space:]]*FLEXIBLE_PRECISION>[[:space:]]*$'
+        '^[[:space:]]*struct[[:space:]]+binary_traits[[:space:]]*<T1,[[:space:]]*T2,[[:space:]]*CONST_PRECISION,[[:space:]]*CONST_PRECISION>[[:space:]]*$'
+        '^[[:space:]]*struct[[:space:]]+binary_traits[[:space:]]*<T1,[[:space:]]*T2,[[:space:]]*VAR_PRECISION,[[:space:]]*VAR_PRECISION>[[:space:]]*$'
+        '^[[:space:]]*struct[[:space:]]+int_traits[[:space:]]*<[[:space:]]*generic_wide_int[[:space:]]*<storage>[[:space:]]*>[[:space:]]*$'
+        '^[[:space:]]*struct[[:space:]]+int_traits[[:space:]]*<[[:space:]]*wide_int_ref_storage[[:space:]]*<SE>[[:space:]]*>[[:space:]]*$'
+        '^[[:space:]]*struct[[:space:]]+int_traits[[:space:]]*<[[:space:]]*fixed_wide_int_storage[[:space:]]*<N>[[:space:]]*>[[:space:]]*$'
+      )
+
+      for rx in "${anchors[@]}"; do
+        tmp="$(mktemp)"
+        awk -v rx="$rx" '
+          BEGIN{ tmplE="^[[:space:]]*template[[:space:]]*<>[[:space:]]*$" }
+          { sub(/\r$/,""); L[++n]=$0 }
+          END{
+            hits=0
+            for(i=3;i<=n;i++)
+              if(L[i] ~ rx && L[i-2] ~ tmplE){ del[i-2]=1; hits++ }
+            if(!hits) exit 3
+            for(i=1;i<=n;i++) if(!del[i]) print L[i]
+          }' "$f" >"$tmp" || { echo "Failed: no N-2 'template <>' for anchor: $rx" >&2; rm -f "$tmp"; exit 1; }
+        mv "$tmp" "$f"
+      done
+    else
+      echo "Commit does not require wide-int patch, continuing..."
+    fi
 
     {
 

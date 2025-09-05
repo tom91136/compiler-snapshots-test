@@ -1,20 +1,29 @@
 package uob_hpc.snapshots
 
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.temporal.IsoFields
+import scala.collection.immutable.ArraySeq
+import scala.jdk.CollectionConverters.*
+import scala.util.Try
+import scala.util.Using
+
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.errors.TransportException
-import org.eclipse.jgit.lib.{Constants, ObjectId, Ref}
-import org.eclipse.jgit.revwalk.{RevCommit, RevWalk}
+import org.eclipse.jgit.lib.Constants
+import org.eclipse.jgit.lib.ObjectId
+import org.eclipse.jgit.lib.Ref
+import org.eclipse.jgit.revwalk.RevCommit
+import org.eclipse.jgit.revwalk.RevWalk
 import org.eclipse.jgit.revwalk.filter.RevFilter
 import org.eclipse.jgit.transport.TagOpt
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.treewalk.filter.PathFilter
-
-import java.nio.file.{Files, Path, Paths, StandardOpenOption}
-import java.time.{Instant, ZoneOffset, ZonedDateTime}
-import java.time.temporal.IsoFields
-import scala.collection.immutable.ArraySeq
-import scala.jdk.CollectionConverters.*
-import scala.util.{Try, Using}
 
 def writeText(xs: String, path: Path): Unit = Files.writeString(
   path,
@@ -61,12 +70,14 @@ val LLVM = Config(
   mirror = "https://github.com/llvm/llvm-project.git",
   arches = Vector("x86_64", "aarch64"),
   tags = {
-    case (s"refs/tags/llvmorg-$ver-init", ref) => ver -> ref // >= 10, use explicit init tag used as basepoint
+    case (s"refs/tags/llvmorg-$maj.$min.$_", ref) if min.forall(_.isDigit) && maj.toIntOption.exists(_ <= 3) =>
+      s"$maj.$min" -> ref // <= 3.x series, no basepoints and keep minor
     case (s"refs/tags/llvmorg-$maj.$_.$_", ref) if maj.forall(_.isDigit) && maj.toInt < 10 =>
-      maj -> ref // pre-10, no basepoints
+      maj -> ref // < 10 series, use major only
+    case (s"refs/tags/llvmorg-$ver-init", ref) => ver -> ref // >= 10, use explicit init tag used as basepoint
   },
   branches = { case (s"refs/heads/release/$ver.x", ref) => ver -> ref },
-  filter = _.toIntOption.exists(_ >= 4),
+  filter = _.toFloatOption.exists(_ >= 3.6f),
   requirePath = Some("llvm/CMakeLists.txt")
 )
 
@@ -167,7 +178,7 @@ object Generator {
     val currentYearAndWeek = (now.get(IsoFields.WEEK_BASED_YEAR), now.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR))
 
     val builds = basepoints.toVector
-      .sortBy(_._1.toIntOption)
+      .sortBy(_._1.toFloatOption)
       .flatMap { case (ver, basepoint) =>
         val repo    = git.getRepository
         val reader  = repo.newObjectReader()
@@ -183,7 +194,7 @@ object Generator {
         }
         val startRef = basepointSpec.getOrElse(mergeBase(repo, head, endRef))
 
-        println(s"Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
+        println(s"Ver=$ver Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
 
         val commits =
           git
