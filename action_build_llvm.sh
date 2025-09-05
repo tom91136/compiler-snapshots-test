@@ -263,11 +263,11 @@ for build in "${builds_array[@]}"; do
 
     time \
     LDFLAGS="-pthread" \
-    CMAKE_C_COMPILER_LAUNCHER=ccache \
-    CMAKE_CXX_COMPILER_LAUNCHER=ccache \
     CFLAGS="$flags" \
     CXXFLAGS="$flags -include cstdint -include cstdlib -include string -include cstdio -Wno-template-id-cdtor -Wno-missing-template-keyword -Wno-attributes -Wno-maybe-uninitialized -Wno-deprecated-declarations -Wno-class-memaccess -Wno-cast-function-type -Wno-redundant-move -Wno-init-list-lifetime" \
       cmake3 -S llvm -B build \
+      -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
       -DCMAKE_BUILD_TYPE=Release \
       -DLLVM_ENABLE_ASSERTIONS=ON \
       -DLLVM_LINK_LLVM_DYLIB=ON \
