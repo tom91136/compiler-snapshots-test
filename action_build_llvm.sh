@@ -34,11 +34,12 @@ build_cmake(){
     # CMake needs openssl-devel, which is included in the build image
     curl -L "https://cmake.org/files/${cmake_major}/cmake-${cmake_ver}.tar.gz" -o "$src_tar"
     tar xf "$src_tar" -C "$workdir"
-    cd "$src_dir"
-    ./bootstrap --prefix="$prefix"
-    make -j "$(nproc)"
-    make install
-    rm -rf "$src_dir" "$src_tar"
+    (
+      cd "$src_dir"
+      cmake3 -S . -B build -DCMAKE_INSTALL_PREFIX="$prefix" -GNinja
+      cmake3 --build build --target install
+      rm -rf "$src_dir" "$src_tar"
+    )
   fi
 
   eval "cmake3() { \"$prefix/bin/cmake\" \"\$@\"; }"
@@ -143,14 +144,16 @@ for build in "${builds_array[@]}"; do
   if git_is_ancestor "$ORC_FIX" "$hash"; then
     f="llvm/include/llvm/ExecutionEngine/Orc/OrcRemoteTargetClient.h"
     echo "Patching $f"
-    awk '{
-      o=$0
-      gsub(/Expected<std::vector<char>>/,"Expected<std::vector<uint8_t>>")
-      if($0!=o) c=1
-      print
-    } END{ if(!c) exit 3 }' "$f" >tmp && mv tmp "$f"
-  else
-    echo "Commit does not require patching OrcRemoteTargetClient.h, continuing..."
+    if [[ -f "$f" ]]; then
+      awk '{
+        o=$0
+        gsub(/Expected<std::vector<char>>/, "Expected<std::vector<uint8_t>>")
+        if ($0!=o) c=1
+        print
+      } END { if (!c) exit 3 }' "$f" > tmp && mv tmp "$f"
+    else echo "Warn: $f not found, skipping." >&2
+    fi
+  else echo "Commit does not require patching OrcRemoteTargetClient.h, continuing..."
   fi
 
   if git_is_ancestor "$CGF_FIX" "$hash"; then
@@ -173,13 +176,12 @@ for build in "${builds_array[@]}"; do
       if ! awk -v p="${pats[i]}" -v r="${reps[i]}" '{
           if(!done && sub(p, r)) done=1
           print
-        } END{ exit (done ? 0 : 2) }' "$f" >"$tmp"; then
-        echo "Warning: no match for pattern ${pats[i]}" >&2
+        } END{ exit (done ? 0 : 2) }' "$f" >"$tmp"
+      then echo "Warning: no match for pattern ${pats[i]}" >&2
       fi
       mv "$tmp" "$f"
     done
-  else
-    echo "Commit does not require patching CGOpenMPRuntime.h, continuing..."
+  else echo "Commit does not require patching CGOpenMPRuntime.h, continuing..."
   fi
 
   if git_is_ancestor "$HMD_FIX" "$hash"; then
@@ -192,8 +194,7 @@ for build in "${builds_array[@]}"; do
       if($0!=o) c=1
       print
     } END{ if(!c) exit 3 }' "$f" >tmp && mv tmp "$f"
-  else
-    echo "Commit does not require patching ValueMap.h, continuing..."
+  else echo "Commit does not require patching ValueMap.h, continuing..."
   fi
 
 

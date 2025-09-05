@@ -148,7 +148,7 @@ for build in "${builds_array[@]}"; do
 
       for rx in "${anchors[@]}"; do
         tmp="$(mktemp)"
-        awk -v rx="$rx" '
+        if awk -v rx="$rx" '
           BEGIN{ tmplE="^[[:space:]]*template[[:space:]]*<>[[:space:]]*$" }
           { sub(/\r$/,""); L[++n]=$0 }
           END{
@@ -157,9 +157,12 @@ for build in "${builds_array[@]}"; do
               if(L[i] ~ rx && L[i-2] ~ tmplE){ del[i-2]=1; hits++ }
             if(!hits) exit 3
             for(i=1;i<=n;i++) if(!del[i]) print L[i]
-          }' "$f" >"$tmp" || { echo "Warn: no N-2 'template <>' for anchor: $rx" >&2; }
-        mv "$tmp" "$f"
+          }' "$f" >"$tmp"
+        then mv "$tmp" "$f"
+        else echo "Warn: no N-2 'template <>' for anchor: $rx" >&2 && rm -f "$tmp"
+        fi
       done
+
     else
       echo "Commit does not require wide-int patch, continuing..."
     fi
