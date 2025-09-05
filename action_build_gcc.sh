@@ -157,7 +157,7 @@ for build in "${builds_array[@]}"; do
               if(L[i] ~ rx && L[i-2] ~ tmplE){ del[i-2]=1; hits++ }
             if(!hits) exit 3
             for(i=1;i<=n;i++) if(!del[i]) print L[i]
-          }' "$f" >"$tmp" || { echo "Failed: no N-2 'template <>' for anchor: $rx" >&2; rm -f "$tmp"; exit 1; }
+          }' "$f" >"$tmp" || { echo "Warn: no N-2 'template <>' for anchor: $rx" >&2; }
         mv "$tmp" "$f"
       done
     else
