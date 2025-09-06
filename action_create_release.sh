@@ -28,7 +28,7 @@ for build in "${builds_array[@]}"; do
    
   echo "Creating release: $build"
 
-  build_artefact="$build.tar.xz"
+  build_artefact="$build.squashfs"
   file "$build_artefact"
   ls -lah "$build_artefact"
 

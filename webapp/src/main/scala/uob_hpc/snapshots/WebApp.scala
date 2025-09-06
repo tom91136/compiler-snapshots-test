@@ -271,8 +271,8 @@ object WebApp {
                                 val key = build.fmtWithArch(arch)
                                 p(
                                   a(
-                                    s"$key.tar.xz",
-                                    href := s"https://github.com/$repo/releases/download/$key/$key.tar.xz"
+                                    s"$key.squashfs",
+                                    href := s"https://github.com/$repo/releases/download/$key/$key.squashfs"
                                   )
                                 )
                               }

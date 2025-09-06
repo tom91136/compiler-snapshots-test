@@ -40,3 +40,6 @@ missing.json
 *-bare/
 
 docs/
+
+*.tar.xz
+*.squashfs

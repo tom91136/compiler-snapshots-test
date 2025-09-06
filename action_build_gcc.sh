@@ -31,25 +31,11 @@ else
 fi
 git config --local gc.auto 0
 
-git_is_ancestor() {
-  local base="$1"
-  local hash="$2"
-
-  if git merge-base --is-ancestor "$base" "$hash"; then return 1
-  else
-    rc=$?
-    if [ "$rc" -eq 1 ]; then return 0
-    else
-      echo "Unable to determine ancestry (git merge-base failed with code $rc); assuming fix present." >&2
-      return 1
-    fi
-  fi
-}
-
+git_is_ancestor() { git merge-base --is-ancestor "$1" "$2"; }
 
 for build in "${builds_array[@]}"; do
   dest_dir="/tmp/$build"
-  dest_archive="/host/$build.tar.xz"
+  dest_archive="/host/$build.squashfs"
 
   build_no_arch="${build%.*}"
   builds_json="/host/builds.json"
@@ -58,18 +44,17 @@ for build in "${builds_array[@]}"; do
 
   # Commits before d5ca27efb4b69f8fdf38240ad62cc1af30a30f77 requires an old glibc for asan to work
   # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113181
-  SAN_FIX=d5ca27efb4b69f8fdf38240ad62cc1af30a30f77
-
+  SAN_FIX="d5ca27efb4b69f8fdf38240ad62cc1af30a30f77"
 
   # Commits before 1a8be74612e0ab0f149f7f843603a8b48ae2843f has incompatibilities with newer (>=2.28?) glibc
   # see https://github.com/gcc-mirror/gcc/commit/1a8be74612e0ab0f149f7f843603a8b48ae2843f
   # We also use alternative flags as C/C++ defaults at the time is different
   UCTX_FIX="1a8be74612e0ab0f149f7f843603a8b48ae2843f"
 
-  # Commits before d68244487a4a370c727befee4dc8488e4794a2db has busted syntax that cases 
-  # "too many template-parameter-lists" 
-  # see https://github.com/gcc-mirror/gcc/commit/d68244487a4a370c727befee4dc8488e4794a2db
-  WINT_FIX="d68244487a4a370c727befee4dc8488e4794a2db"
+  # Commits before df2a7a38f6f49656f08e0c34d7856b2709a9e5b6 has busted syntax that cases
+  # "too many template-parameter-lists"
+  # see https://github.com/gcc-mirror/gcc/commit/df2a7a38f6f49656f08e0c34d7856b2709a9e5b6
+  WINT_FIX="df2a7a38f6f49656f08e0c34d7856b2709a9e5b6"
 
   echo "Build   : $build"
   echo "Commit  : $hash"
@@ -84,8 +69,7 @@ for build in "${builds_array[@]}"; do
     origin "$hash" "$SAN_FIX" "$UCTX_FIX" "$WINT_FIX"
 
   git checkout -f -q "$hash"
-  git clean -fdx
-
+  git clean -ffdx
 
   echo "Source cloned, starting build step..."
 
@@ -104,15 +88,19 @@ for build in "${builds_array[@]}"; do
     install_dir="$dest_dir/opt/$build"
     mkdir -p "$install_dir"
 
+    extra=()
     flags="-O2 -g1 -gz=zlib -fno-omit-frame-pointer -gno-column-info -femit-struct-debug-reduced"
 
     if git_is_ancestor "$SAN_FIX" "$hash"; then
-      extra+=("--disable-libsanitizer")
-    else
       echo "Commit does not require disabling ASAN support, continuing..."
+    else
+      extra+=("--disable-libsanitizer")
+      echo "Disabling ASAN support"
     fi
 
     if git_is_ancestor "$UCTX_FIX" "$hash"; then
+      echo "Commit does not require ucontext patch and alternative std flags, continuing..."
+    else
       for arch in i386 aarch64; do
         f="libgcc/config/$arch/linux-unwind.h"
         echo "Patching $f"
@@ -126,11 +114,11 @@ for build in "${builds_array[@]}"; do
       extra+=(CXXFLAGS_FOR_TARGET="-O2 -g1" CFLAGS_FOR_TARGET="-O2 -g1")
       extra+=(CXX="ccache c++ -std=gnu++98")
       extra+=(CC="ccache cc -std=gnu89 -Wno-implicit-int -Wno-implicit-function-declaration")
-    else
-      echo "Commit does not require ucontext patch and alternative std flags, continuing..."
     fi
 
     if git_is_ancestor "$WINT_FIX" "$hash"; then
+      echo "Commit does not require wide-int patch, continuing..."
+    else
       f="gcc/wide-int.h"
       echo "Patching $f"
       anchors=(
@@ -157,43 +145,49 @@ for build in "${builds_array[@]}"; do
               if(L[i] ~ rx && L[i-2] ~ tmplE){ del[i-2]=1; hits++ }
             if(!hits) exit 3
             for(i=1;i<=n;i++) if(!del[i]) print L[i]
-          }' "$f" >"$tmp"
-        then mv "$tmp" "$f"
-        else echo "Warn: no N-2 'template <>' for anchor: $rx" >&2 && rm -f "$tmp"
+          }' "$f" >"$tmp"; then
+          mv "$tmp" "$f"
+        else
+          echo "Warn: no N-2 'template <>' for anchor: $rx" >&2 && rm -f "$tmp"
         fi
       done
-
-    else
-      echo "Commit does not require wide-int patch, continuing..."
     fi
 
     {
 
-    time ./contrib/download_prerequisites --no-isl --no-verify
-    (
-      cd build
-      ../configure \
-        CXX="ccache c++" \
-        CC="ccache cc" \
-        CXXFLAGS="$flags" \
-        CFLAGS="$flags -Wno-error=incompatible-pointer-types -Wno-maybe-uninitialized" \
-        --prefix="/opt/$build" \
-        --enable-languages=c,c++,fortran \
-        --disable-nls \
-        --disable-bootstrap \
-        --disable-multilib \
-        --disable-libvtv \
-        --without-isl \
-        "${extra[@]}"
-    )
-    time make --silent -C build -j "$(nproc)"
-    time make --silent -C build -j "$(nproc)" install DESTDIR="$dest_dir"
+      time ./contrib/download_prerequisites --no-isl --no-verify
+      (
+        cd build
+        ../configure \
+          CXX="ccache c++" \
+          CC="ccache cc" \
+          CXXFLAGS="$flags" \
+          CFLAGS="$flags -Wno-error=incompatible-pointer-types -Wno-maybe-uninitialized" \
+          --prefix="/opt/$build" \
+          --enable-languages=c,c++,fortran \
+          --disable-nls \
+          --disable-bootstrap \
+          --disable-multilib \
+          --disable-libvtv \
+          --without-isl \
+          "${extra[@]}"
+      )
+      time make --silent -C build -j "$(nproc)"
+      time make --silent -C build -j "$(nproc)" install DESTDIR="$dest_dir"
 
     } 2>&1 | tee "$install_dir/build.log"
 
   fi
 
-  time XZ_OPT='-T0 -9e --block-size=16MiB' tar cfJ "$dest_archive" --checkpoint=.1000 --totals --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -C "$dest_dir" .
+  filter=()
+  case "$(uname -m)" in
+  x86_64 | amd64) filter=("-Xbcj" "x86") ;;
+  aarch64 | arm64) filter=("-Xbcj" "arm") ;;
+  *) ;;
+  esac
+
+  mksquashfs "$dest_dir" "$dest_archive" \
+    -comp xz "${filter[@]}" -Xdict-size 1M -b 1M -always-use-fragments -all-root -no-xattrs -noappend -processors "$(nproc)"
 
   echo ""
   du -sh "$dest_dir"
