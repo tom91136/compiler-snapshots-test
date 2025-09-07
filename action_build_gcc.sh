@@ -42,14 +42,14 @@ for build in "${builds_array[@]}"; do
   [ -f "/host/builds-gcc.json" ] && builds_json="/host/builds-gcc.json"
   hash=$(jq -r ".\"$build_no_arch\" | .hash" "$builds_json")
 
-  # Commits before d5ca27efb4b69f8fdf38240ad62cc1af30a30f77 requires an old glibc for asan to work
+  # Commits before 71b55d45e4304f5e2e98ac30473c581f58fc486b requires an old glibc for asan to work
   # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113181
-  SAN_FIX="d5ca27efb4b69f8fdf38240ad62cc1af30a30f77"
+  SAN_FIX="71b55d45e4304f5e2e98ac30473c581f58fc486b"
 
-  # Commits before 1a8be74612e0ab0f149f7f843603a8b48ae2843f has incompatibilities with newer (>=2.28?) glibc
-  # see https://github.com/gcc-mirror/gcc/commit/1a8be74612e0ab0f149f7f843603a8b48ae2843f
+  # Commits before 883312dc79806f513275b72502231c751c14ff72 has incompatibilities with newer (>=2.28?) glibc
+  # see https://github.com/gcc-mirror/gcc/commit/883312dc79806f513275b72502231c751c14ff72
   # We also use alternative flags as C/C++ defaults at the time is different
-  UCTX_FIX="1a8be74612e0ab0f149f7f843603a8b48ae2843f"
+  UCTX_FIX="883312dc79806f513275b72502231c751c14ff72"
 
   # Commits before df2a7a38f6f49656f08e0c34d7856b2709a9e5b6 has busted syntax that cases
   # "too many template-parameter-lists"

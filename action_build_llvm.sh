@@ -269,6 +269,7 @@ for build in "${builds_array[@]}"; do
       "-Wno-cast-function-type"
       "-Wno-redundant-move"
       "-Wno-init-list-lifetime"
+      "-Wno-dangling-reference"
     )
 
     cmake3 --version
