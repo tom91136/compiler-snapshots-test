@@ -91,6 +91,7 @@ jobs:
 
   build:
     needs: [ compute_builds, build_container ]
+    if: ${{ needs.compute_builds.outputs.includes != '[]' && needs.compute_builds.outputs.includes != '' }}
     strategy:
       fail-fast: false # don't give up too early
       matrix:
