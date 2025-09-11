@@ -33,7 +33,7 @@ def writeText(xs: String, path: Path): Unit = Files.writeString(
   StandardOpenOption.WRITE
 ): Unit
 
-final val GHAMaxJobCount = 128
+final val GHAMaxJobCount = 256
 
 type PIdentF[A] = PartialFunction[A, A]
 
@@ -278,26 +278,37 @@ object Generator {
       Set.empty[String]
     }.get
 
-    val missingBuilds = builds
-      .flatMap(b => config.arches.map(b.fmtWithArch(_)))
-      .filterNot(releasedBuildsWithArch.contains(_))
 
-    val matrix = if (missingBuilds.nonEmpty) {
-      val buildsPerJob = (missingBuilds.size.toDouble / GHAMaxJobCount).ceil.toInt
-      val jobGrouped   = missingBuilds.grouped(buildsPerJob).map(_.mkString(";")).toList
-      println(s"Computed builds = ${builds.size} (platform independent)")
-      println(s"Released builds = ${releasedBuildsWithArch.size} (platform dependent)")
-      println(s"Required builds = ${missingBuilds.size} (platform dependent)")
-      println(s"       Max jobs = $GHAMaxJobCount")
-      println(s" Builds Per job = $buildsPerJob")
-      println(s"     Total jobs = ${jobGrouped.size}")
-      jobGrouped
-    } else Nil
+    val allMissing = config.arches.map { arch =>
+      arch -> builds
+        .map(_.fmtWithArch(arch))
+        .filterNot(releasedBuildsWithArch.contains(_))
+    }
 
-    // XXX spaces break ::set-output in the action yaml for some reason, so no pretty print
-    writeText(Pickler.write(matrix), Paths.get(s"matrix-${config.name}.json"))
-    writeText(Pickler.write(builds.map(b => b.fmtNoArch -> b).to(Map)), Paths.get(s"builds-${config.name}.json"))
-    writeText(Pickler.write(missingBuilds), Paths.get(s"missing-${config.name}.json"))
+    val totalMissing = allMissing.map(_._2.size).sum
+    val buildsPerJob = (totalMissing.toDouble / GHAMaxJobCount).ceil.toInt
+
+    println(s"Released builds = ${releasedBuildsWithArch.size} (total)")
+    println(s"Computed builds = ${builds.size} (total)")
+    println(s"Max jobs =        $GHAMaxJobCount")
+    println(s"Builds Per job =  $buildsPerJob")
+
+    allMissing.foreach { (arch, missing) =>
+      val matrix = if (missing.nonEmpty) {
+        val jobGrouped = missing.grouped(buildsPerJob).map(_.mkString(";")).toList
+        println(s"[$arch] Missing builds =  ${missing.size}")
+        println(s"[$arch] Total jobs =      ${jobGrouped.size}")
+        jobGrouped
+      } else Nil
+
+      // XXX spaces break ::set-output in the action yaml for some reason, so no pretty print
+      writeText(Pickler.write(matrix), Paths.get(s"matrix-$arch-${config.name}.json"))
+      writeText(
+        Pickler.write(builds.map(b => b.fmtNoArch -> b).to(Map)),
+        Paths.get(s"builds-$arch-${config.name}.json")
+      )
+      writeText(Pickler.write(missing), Paths.get(s"missing-$arch-${config.name}.json"))
+    }
     println("Build computed")
 
     if (generateApi) {
