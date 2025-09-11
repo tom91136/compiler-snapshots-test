@@ -74,8 +74,8 @@ jobs:
         id: set-outputs
         run: |
           set -euo pipefail
-          jq -c '[ .[] | {os:"ubuntu-24.04",     jobs:.} ]' matrix-x86_64.json  > includes_x86_64.json
-          jq -c '[ .[] | {os:"ubuntu-24.04-arm", jobs:.} ]' matrix-aarch64.json > includes_aarch64.json
+          jq -c '[ .[] | {os:"ubuntu-24.04",     jobs:.} ]' matrix-${{ inputs.config }}-x86_64.json  > includes_x86_64.json
+          jq -c '[ .[] | {os:"ubuntu-24.04-arm", jobs:.} ]' matrix-${{ inputs.config }}-aarch64.json > includes_aarch64.json
           jq -s '.[0] + .[1]' includes_x86_64.json includes_aarch64.json > includes.json
           echo "includes=$(cat include.json)" >> "$GITHUB_OUTPUT"
 
