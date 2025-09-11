@@ -78,6 +78,7 @@ jobs:
           jq -c '[ .[] | {os:"ubuntu-24.04-arm", jobs:.} ]' matrix-${{ inputs.config }}-aarch64.json > includes_aarch64.json
           jq -s '.[0] + .[1]' includes_x86_64.json includes_aarch64.json > includes.json
           echo "includes=$(cat includes.json)" >> "$GITHUB_OUTPUT"
+          jq . includes.json || true
 
       - name: Save build artefacts
         uses: actions/upload-artifact@v4
@@ -92,7 +93,8 @@ jobs:
     needs: [ compute_builds, build_container ]
     strategy:
       fail-fast: false # don't give up too early
-      matrix: ${{ fromJson(needs.compute_builds.outputs.includes) }}
+      matrix:
+        include: ${{ fromJson(needs.compute_builds.outputs.includes) }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
