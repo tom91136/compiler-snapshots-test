@@ -302,12 +302,12 @@ object Generator {
       } else Nil
 
       // XXX spaces break ::set-output in the action yaml for some reason, so no pretty print
-      writeText(Pickler.write(matrix), Paths.get(s"matrix-$arch-${config.name}.json"))
+      writeText(Pickler.write(matrix), Paths.get(s"matrix-${config.name}-$arch.json"))
       writeText(
         Pickler.write(builds.map(b => b.fmtNoArch -> b).to(Map)),
-        Paths.get(s"builds-$arch-${config.name}.json")
+        Paths.get(s"builds-${config.name}-$arch.json")
       )
-      writeText(Pickler.write(missing), Paths.get(s"missing-$arch-${config.name}.json"))
+      writeText(Pickler.write(missing), Paths.get(s"missing-${config.name}-$arch.json"))
     }
     println("Build computed")
 
