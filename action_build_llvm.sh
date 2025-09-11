@@ -103,6 +103,11 @@ for build in "${builds_array[@]}"; do
   # where `hasMD` had no users up until that point
   HMD_FIX="69341e6abca92f7f118ee7bd99be0cdfc649386f"
 
+  # Issue specific to GCC 14 macro expansion when compiling Clang,
+  # Debian has a patch for 17-18 at https://salsa.debian.org/pkg-llvm-team/llvm-toolchain/-/blob/f83b695bae4af4361b6892203305cdb05b3f41ab/debian/patches/arm64-clang-gcc-14.patch
+  # a "hack" landed upstream during 18
+  ARM_FIX="d54dfdd1b53ff72344287d250c2b67329792c840"
+
   echo "Build   : $build"
   echo "Commit  : $hash"
 
@@ -113,7 +118,7 @@ for build in "${builds_array[@]}"; do
     --progress \
     --no-recurse-submodules \
     --filter=blob:none \
-    origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX"
+    origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX"
 
   git checkout -f -q "$hash"
   git clean -ffdx
@@ -190,6 +195,72 @@ for build in "${builds_array[@]}"; do
       if($0!=o) c=1
       print
     } END{ if(!c) exit 3 }' "$f" >tmp && mv tmp "$f"
+  fi
+
+  if git_is_ancestor "$ARM_FIX" "$hash"; then
+    echo "Commit does not require patching TokenKinds.def, continuing..."
+  else
+    echo "Patching TokenKinds.def + 2 others"
+token_patch=$(cat <<'EOF'
+diff --git a/clang/include/clang/Basic/TokenKinds.def b/clang/include/clang/Basic/TokenKinds.def
+index ef0dad0f2dcd..4c3965ca24ed 100644
+--- a/clang/include/clang/Basic/TokenKinds.def
++++ b/clang/include/clang/Basic/TokenKinds.def
+@@ -753,7 +753,7 @@ KEYWORD(__builtin_sycl_unique_stable_name, KEYSYCL)
+ 
+ // Keywords defined by Attr.td.
+ #ifndef KEYWORD_ATTRIBUTE
+-#define KEYWORD_ATTRIBUTE(X) KEYWORD(X, KEYALL)
++#define KEYWORD_ATTRIBUTE(X, HASARG, EMPTY) KEYWORD(EMPTY ## X, KEYALL)
+ #endif
+ #include "clang/Basic/AttrTokenKinds.inc"
+ 
+diff --git a/clang/include/clang/Basic/TokenKinds.h b/clang/include/clang/Basic/TokenKinds.h
+index e4857405bc7f..988696b6d92b 100644
+--- a/clang/include/clang/Basic/TokenKinds.h
++++ b/clang/include/clang/Basic/TokenKinds.h
+@@ -109,7 +109,7 @@ bool isPragmaAnnotation(TokenKind K);
+ 
+ inline constexpr bool isRegularKeywordAttribute(TokenKind K) {
+   return (false
+-#define KEYWORD_ATTRIBUTE(X) || (K == tok::kw_##X)
++#define KEYWORD_ATTRIBUTE(X, HASARG, EMPTY) || (K == tok::kw_##X)
+ #include "clang/Basic/AttrTokenKinds.inc"
+   );
+ }
+diff --git a/clang/utils/TableGen/ClangAttrEmitter.cpp b/clang/utils/TableGen/ClangAttrEmitter.cpp
+index b5813c6abc2b..3394e4d8594c 100644
+--- a/clang/utils/TableGen/ClangAttrEmitter.cpp
++++ b/clang/utils/TableGen/ClangAttrEmitter.cpp
+@@ -3423,14 +3423,14 @@ void EmitClangAttrTokenKinds(RecordKeeper &Records, raw_ostream &OS) {
+   // Assume for now that the same token is not used in multiple regular
+   // keyword attributes.
+   for (auto *R : Records.getAllDerivedDefinitions("Attr"))
+-    for (const auto &S : GetFlattenedSpellings(*R))
+-      if (isRegularKeywordAttribute(S)) {
+-        if (!R->getValueAsListOfDefs("Args").empty())
+-          PrintError(R->getLoc(),
+-                     "RegularKeyword attributes with arguments are not "
+-                     "yet supported");
++    for (const auto &S : GetFlattenedSpellings(*R)) {
++      if (!isRegularKeywordAttribute(S))
++          continue;
++        std::vector<Record *> Args = R->getValueAsListOfDefs("Args");
++        bool HasArgs = llvm::any_of(Args, [](const Record *Arg) { return !Arg->getValueAsBit("Fake"); });
+         OS << "KEYWORD_ATTRIBUTE("
+-           << S.getSpellingRecord().getValueAsString("Name") << ")\n";
++           << S.getSpellingRecord().getValueAsString("Name") << ", "
++           << (HasArgs ? "true" : "false") << ", )\n";
+       }
+   OS << "#undef KEYWORD_ATTRIBUTE\n";
+ }
+EOF
+)
+    if echo "$token_patch" | git apply -; then
+       echo "TokenKinds.def patched applied" 
+    else
+       echo "Warn: TokenKinds.def patch did not apply"
+    fi
   fi
 
   if $dry; then
