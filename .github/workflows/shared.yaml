@@ -46,8 +46,7 @@ jobs:
   compute_builds:
     runs-on: ubuntu-24.04
     outputs:
-      jobs-x86_64: ${{ steps.set-outputs.outputs.jobs-x86_64 }}
-      jobs-aarch64: ${{ steps.set-outputs.outputs.jobs-aarch64 }}
+      includes: ${{ steps.set-outputs.outputs.includes }}
     steps:
       - uses: actions/checkout@v4
 
@@ -55,30 +54,30 @@ jobs:
         uses: sbt/setup-sbt@v1
 
       - name: Compute required builds
-        # Assumes the generator writes the four files:
-        # matrix-x86_64.json, matrix-aarch64.json (semicolon-separated job strings)
-        # builds-x86_64.json, builds-aarch64.json (release metadata)
         run: sbt "project generator; run ${{ inputs.config }} $GITHUB_REPOSITORY"
 
       - name: Show matrices
         run: |
           echo "== matrix-${{ inputs.config }}-x86_64.json =="
-          cat matrix-${{ inputs.config }}-x86_64.json || true
+          jq . matrix-${{ inputs.config }}-x86_64.json || true
           echo "== matrix-${{ inputs.config }}-aarch64.json =="
-          cat matrix-${{ inputs.config }}-aarch64.json || true
+          jq . matrix-${{ inputs.config }}-aarch64.json || true
 
       - name: Show build lists
         run: |
           echo "== builds-${{ inputs.config }}-x86_64.json =="
-          jq . builds-${{ inputs.config }}-x86_64.json
+          jq . builds-${{ inputs.config }}-x86_64.json || true
           echo "== builds-${{ inputs.config }}-aarch64.json =="
-          jq . builds-${{ inputs.config }}-aarch64.json
+          jq . builds-${{ inputs.config }}-aarch64.json || true
 
       - name: Set outputs
         id: set-outputs
         run: |
-          echo "jobs-x86_64=$(cat matrix-${{ inputs.config }}-x86_64.json)"   >> "$GITHUB_OUTPUT"
-          echo "jobs-aarch64=$(cat matrix-${{ inputs.config }}-aarch64.json)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          jq -c --arg os "ubuntu-24.04"       '[.[] | {os:$os, jobs:.}]' matrix-"${{ inputs.config }}"-x86_64.json  > include-x86_64.json
+          jq -c --arg os "ubuntu-24.04-arm"   '[.[] | {os:$os, jobs:.}]' matrix-"${{ inputs.config }}"-aarch64.json > include-aarch64.json
+          jq -c -s 'add' include-x86_64.json include-aarch64.json > includes.json
+          echo "includes=$(cat includes.json)" >> "$GITHUB_OUTPUT"
 
       - name: Save build artefacts
         uses: actions/upload-artifact@v4
@@ -87,17 +86,13 @@ jobs:
           path: |
             builds-${{ inputs.config }}-x86_64.json
             builds-${{ inputs.config }}-aarch64.json
+          if-no-files-found: ignore
 
   build:
     needs: [ compute_builds, build_container ]
     strategy:
       fail-fast: false # don't give up too early
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            jobs: ${{ fromJson(needs.compute_builds.outputs.jobs-x86_64) }}
-          - os: ubuntu-24.04-arm
-            jobs: ${{ fromJson(needs.compute_builds.outputs.jobs-aarch64) }}
+      matrix: ${{ fromJson(needs.compute_builds.outputs.includes) }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -135,7 +130,7 @@ jobs:
 
           host_arch="$(uname -m)"
 
-          if [[ -f "builds-${host_arch}.json" ]]; then
+          if [[ -f "builds-${{ inputs.config }}-${host_arch}.json" ]]; then
             cp "builds-${{ inputs.config }}-${host_arch}.json" builds.json
           else
             echo "No builds-${{ inputs.config }}-${host_arch}.json found" >&2
