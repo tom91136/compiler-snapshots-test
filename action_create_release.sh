@@ -8,7 +8,6 @@ BUILDS=$2
 # shellcheck disable=SC2206
 builds_array=(${BUILDS//;/ }) # split by ws
 
-
 gh_api() {
   local method="$1" url="$2" data="${3:-}"
   if [ -n "$data" ]; then
@@ -25,7 +24,7 @@ gh_api() {
 }
 
 for build in "${builds_array[@]}"; do
-   
+
   echo "Creating release: $build"
 
   build_artefact="$build.squashfs"
@@ -33,8 +32,10 @@ for build in "${builds_array[@]}"; do
   ls -lah "$build_artefact"
 
   build_no_arch="${build%.*}"
-  # make sure it's quoted, so no `-r`
-  quoted_changes=$(jq "[ .\"$build_no_arch\" | .changes | .[] | \"[\`\(.[0])\`] \`\(.[1]/1000 | todateiso8601)\` \(.[2])\"] | join(\"\n\")" builds.json)
+  config="${build%%-*}"
+  source="builds-$config-$(uname -m).json"
+  # XXX make sure it's quoted, so no `-r`
+  quoted_changes=$(jq "[ .\"$build_no_arch\" | .changes | .[] | \"[\`\(.[0])\`] \`\(.[1]/1000 | todateiso8601)\` \(.[2])\"] | join(\"\n\")" "$source")
 
   echo "Build  : $build"
   echo "Changes: $quoted_changes"
@@ -53,7 +54,6 @@ END
   )
 
   echo "Using release config: $release_config"
-
 
   get_release_json=$(gh_api GET "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$build" || true)
   release_id=$(echo "${get_release_json:-}" | jq -r '.id // empty')
@@ -82,7 +82,6 @@ END
   else
     echo "Release exists for tag '$build' (id=$release_id)"
   fi
-
 
   echo "Preparing to upload asset $build_artefact -> $release_id"
 
