@@ -172,7 +172,8 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
     Set.empty[String]
   }.get
 
-  println(s"Released builds = ${releasedBuildsWithArch.size} (total)")
+  println(s"Released Builds = ${releasedBuildsWithArch.size} (total)")
+  println(s"Max Jobs =        $GHAMaxJobCount")
 
   val archBuilds = config.arches.map { arch =>
 
@@ -206,8 +207,6 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
         val startRef = basepointSpec.getOrElse(mergeBase(repo, head, endRef))
 
         println(s"Ver=$ver Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
-
-
 
         val commits =
           git
@@ -281,16 +280,17 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
     arch -> (builds, missing)
   }
 
-  archBuilds.foreach { case (arch, (builds, missing)) =>
-    val buildsPerJob = (missing.length.toDouble / GHAMaxJobCount).ceil.toInt
-    println(s"Computed builds = ${builds.size} (total)")
-    println(s"Max jobs =        $GHAMaxJobCount")
-    println(s"Builds Per job =  $buildsPerJob")
+  val allMissing   = archBuilds.flatMap(_._2._2)
+  val buildsPerJob = (allMissing.length.toDouble / GHAMaxJobCount).ceil.toInt
 
-    val matrix = if (missing.nonEmpty) {
-      val jobGrouped = missing.grouped(buildsPerJob).map(_.mkString(";")).toList
-      println(s"[$arch] Missing builds =  ${missing.size}")
-      println(s"[$arch] Total jobs =      ${jobGrouped.size}")
+  archBuilds.foreach { case (arch, (builds, pending)) =>
+    println(s"[$arch] Computed Builds = ${builds.size} (total)")
+    println(s"[$arch] Builds Per Job =  $buildsPerJob")
+
+    val matrix = if (pending.nonEmpty) {
+      val jobGrouped = pending.grouped(buildsPerJob).map(_.mkString(";")).toList
+      println(s"[$arch] Pending Builds =  ${pending.size}")
+      println(s"[$arch] Total Jobs =      ${jobGrouped.size}")
       jobGrouped
     } else Nil
 
@@ -300,7 +300,7 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
       Pickler.write(builds.map(b => b.fmtNoArch -> b).to(Map)),
       Paths.get(s"builds-${config.name}-$arch.json")
     )
-    writeText(Pickler.write(missing), Paths.get(s"missing-${config.name}-$arch.json"))
+    writeText(Pickler.write(pending), Paths.get(s"missing-${config.name}-$arch.json"))
   }
 
   println("Build computed")
