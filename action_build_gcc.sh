@@ -38,8 +38,7 @@ for build in "${builds_array[@]}"; do
   dest_archive="/host/$build.squashfs"
 
   build_no_arch="${build%.*}"
-  builds_json="/host/builds.json"
-  [ -f "/host/builds-gcc.json" ] && builds_json="/host/builds-gcc.json"
+  builds_json="/host/builds-gcc-$(uname -m).json"
   hash=$(jq -r ".\"$build_no_arch\" | .hash" "$builds_json")
 
   # Commits before 71b55d45e4304f5e2e98ac30473c581f58fc486b requires an old glibc for asan to work

@@ -54,7 +54,7 @@ jobs:
         uses: sbt/setup-sbt@v1
 
       - name: Compute required builds
-        run: sbt "project generator; run ${{ inputs.config }} $GITHUB_REPOSITORY"
+        run: sbt "project generator; run ${{ inputs.config }} false"
 
       - name: Show matrices
         run: |
@@ -132,13 +132,6 @@ jobs:
           summary=()
 
           host_arch="$(uname -m)"
-
-          if [[ -f "builds-${{ inputs.config }}-${host_arch}.json" ]]; then
-            cp "builds-${{ inputs.config }}-${host_arch}.json" builds.json
-          else
-            echo "No builds-${{ inputs.config }}-${host_arch}.json found" >&2
-            : > builds.json
-          fi
 
           fmt_time() { date -ud "@$1" +'%Hh%Mm%Ss'; }
 

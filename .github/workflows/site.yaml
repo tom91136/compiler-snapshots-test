@@ -1,6 +1,7 @@
 name: Deploy static website
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
   workflow_run:
@@ -8,22 +9,16 @@ on:
     types:
       - completed
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Allow one concurrent deployment
 concurrency:
   group: "pages"
   cancel-in-progress: true
 
 jobs:
-  # Single deploy job since we're just deploying
   deploy:
     environment:
       name: github-pages
@@ -39,7 +34,7 @@ jobs:
           sbt "project webapp; dist"
       - name: Fetch builds
         run: |
-          sbt "project generator; run gcc $GITHUB_REPOSITORY true; run llvm $GITHUB_REPOSITORY true"
+          sbt "project generator; run gcc true; run llvm true"
           mv *.json docs/
           mv gcc docs/
           mv llvm docs/

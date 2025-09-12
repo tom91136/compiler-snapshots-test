@@ -35,14 +35,14 @@ def writeText(xs: String, path: Path): Unit = Files.writeString(
 
 final val GHAMaxJobCount = 256
 
-type PIdentF[A] = PartialFunction[A, A]
+type IdPartialFn[A] = PartialFunction[A, A]
 
 case class Config(
     name: String,
     mirror: String,
     arches: Vector[String],
-    tags: PIdentF[(String, Ref)],
-    branches: PIdentF[(String, Ref)],
+    basepointTags: IdPartialFn[(String, Ref)],
+    versionBranches: IdPartialFn[(String, Ref)],
     filter: String => Boolean,
     requirePath: Option[String] = None
 )
@@ -54,9 +54,12 @@ val GCC = Config(
   name = "gcc",
   mirror = "https://github.com/gcc-mirror/gcc.git",
   arches = Vector("x86_64", "aarch64"),
-  tags = { case (s"refs/tags/basepoints/gcc-$ver", ref) => ver -> ref },
-  branches = { case (s"refs/heads/releases/gcc-$ver", ref) => ver -> ref },
-  filter = _.toIntOption.exists(_ >= 5)
+  basepointTags = {
+    case (s"refs/tags/basepoints/gcc-$ver", ref)                                       => ver          -> ref
+    case (s"refs/tags/releases/gcc-$maj.$min.0", ref) if maj.toIntOption.exists(_ < 5) => s"$maj.$min" -> ref
+  },
+  versionBranches = { case (s"refs/heads/releases/gcc-$ver", ref) => ver -> ref },
+  filter = _.toFloatOption.exists(_ >= 5.0) // see https://gcc.gnu.org/releases.html
 )
 
 // LLVM has a similar pattern to GCC with basepoints and release branches for version >= 10.
@@ -69,15 +72,16 @@ val LLVM = Config(
   name = "llvm",
   mirror = "https://github.com/llvm/llvm-project.git",
   arches = Vector("x86_64", "aarch64"),
-  tags = {
+  basepointTags = {
     case (s"refs/tags/llvmorg-$maj.$min.$_", ref) if min.forall(_.isDigit) && maj.toIntOption.exists(_ <= 3) =>
       s"$maj.$min" -> ref // <= 3.x series, no basepoints and keep minor
     case (s"refs/tags/llvmorg-$maj.$_.$_", ref) if maj.forall(_.isDigit) && maj.toInt < 10 =>
       maj -> ref // < 10 series, use major only
     case (s"refs/tags/llvmorg-$ver-init", ref) => ver -> ref // >= 10, use explicit init tag used as basepoint
+
   },
-  branches = { case (s"refs/heads/release/$ver.x", ref) => ver -> ref },
-  filter = _.toFloatOption.exists(_ >= 3.6f),
+  versionBranches = { case (s"refs/heads/release/$ver.x", ref) => ver -> ref },
+  filter = _.toFloatOption.exists(_ >= 3.6f), // see https://releases.llvm.org/
   requirePath = Some("llvm/CMakeLists.txt")
 )
 
@@ -101,14 +105,79 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
   } finally walk.close()
 }
 
-object Generator {
+@main def main(configName: String, generateApi: Boolean = false): Unit = {
 
-  def main(args: Array[String]): Unit = {
+  sys.props += ("org.slf4j.simpleLogger.logFile" -> "System.out"): Unit
 
-    sys.props += ("org.slf4j.simpleLogger.logFile" -> "System.out"): Unit
+  val config = configName.toLowerCase match {
+    case "llvm" => LLVM
+    case "gcc"  => GCC
+    case _      => Console.err.println(s"Unsupported config: $configName"); sys.exit(1)
+  }
+
+  val repoDir = Paths.get(s"./${config.name}-bare").normalize().toAbsolutePath
+  if (!Files.exists(repoDir)) {
+    sys.process.Process(
+      Seq(
+        "git",
+        "clone",
+        "--progress",
+        "--bare",
+        "--no-checkout",
+        s"--filter=${if (config.requirePath.isDefined) "blob:none" else "tree:0"}",
+        config.mirror,
+        repoDir.toString
+      )
+    ).! : Unit
+  }
+
+  val git = Git.open(repoDir.toFile)
+
+  val basepoints = git
+    .tagList()
+    .call()
+    .asScala
+    .map(r => r.getName -> r)
+    .collect(config.basepointTags)
+    .filter(x => config.filter(x._1))
+    .toMap
+
+  val branches = git
+    .branchList()
+    .call()
+    .asScala
+    .map(r => r.getName -> r)
+    .collect(config.versionBranches)
+    .filter(x => config.filter(x._1))
+    .toMap
+
+  val now                = ZonedDateTime.now()
+  val currentYearAndWeek = (now.get(IsoFields.WEEK_BASED_YEAR), now.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR))
+
+  // val releasedBuilds = fetchReleases(repoOwner, repoName).map(_.tag_name).toSet
+  // XXX GH limits the release API to max 1000 entries regardless of items per page or page count
+  //   To work around this, we list the Git tags which is required for a release and doesn't have
+  //   arbitrary API limits.
+  val releasedBuildsWithArch = Try {
+    val localRepo = Git.open(Paths.get(".").toFile)
+    localRepo.fetch().setTagOpt(TagOpt.FETCH_TAGS).setDepth(1).call()
+    localRepo
+      .tagList()
+      .call()
+      .asScala
+      .map(_.getName.stripPrefix("refs/tags/"))
+      .toSet
+  }.recover { case e: TransportException =>
+    Console.err.println(s"Using empty tag list: ${e.getMessage}")
+    Set.empty[String]
+  }.get
+
+  println(s"Released builds = ${releasedBuildsWithArch.size} (total)")
+
+  val archBuilds = config.arches.map { arch =>
 
     val ignoreCommits = Files
-      .readAllLines(Paths.get("./ignore_commits"))
+      .readAllLines(Paths.get(s"./ignore_commits.$arch"))
       .asScala
       .map(_.trim)
       .filterNot(_.isBlank())
@@ -117,65 +186,7 @@ object Generator {
       .sorted
       .toSeq
 
-    println(s"Ignoring the following commits: \n${ignoreCommits.mkString("\n")}")
-
-    val (config, _, _, generateApi) = args.toList match {
-      case config :: s"$repoOwner/$repoName" :: xs if xs.size <= 1 =>
-        (
-          config.toLowerCase match {
-            case "llvm" => LLVM
-            case "gcc"  => GCC
-            case _      => Console.err.println(s"Unsupported config: $config"); sys.exit(1)
-          },
-          repoOwner,
-          repoName,
-          xs.contains("true")
-        )
-      case bad =>
-        Console.err.println(
-          s"Bad arg `${bad.mkString(" ")}`, expecting `config:string repoOwner:string repoName:string api:(true|false)?`"
-        )
-        sys.exit(1)
-    }
-
-    val repoDir = Paths.get(s"./${config.name}-bare").normalize().toAbsolutePath
-    if (!Files.exists(repoDir)) {
-      sys.process.Process(
-        Seq(
-          "git",
-          "clone",
-          "--progress",
-          "--bare",
-          "--no-checkout",
-          s"--filter=${if (config.requirePath.isDefined) "blob:none" else "tree:0"}",
-          config.mirror,
-          repoDir.toString
-        )
-      ).! : Unit
-    }
-
-    val git = Git.open(repoDir.toFile)
-
-    val basepoints = git
-      .tagList()
-      .call()
-      .asScala
-      .map(r => r.getName -> r)
-      .collect(config.tags)
-      .filter(x => config.filter(x._1))
-      .toMap
-
-    val branches = git
-      .branchList()
-      .call()
-      .asScala
-      .map(r => r.getName -> r)
-      .collect(config.branches)
-      .filter(x => config.filter(x._1))
-      .toMap
-
-    val now                = ZonedDateTime.now()
-    val currentYearAndWeek = (now.get(IsoFields.WEEK_BASED_YEAR), now.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR))
+    println(s"Ignoring the following commits for $arch: \n${ignoreCommits.mkString("\n")}")
 
     val builds = basepoints.toVector
       .sortBy(_._1.toFloatOption)
@@ -189,12 +200,14 @@ object Generator {
         }
         val endRef        = repo.resolve(endSpec)
         val basepointSpec = basepoint.getName match {
-          case s"$_-init" => Option(basepoint.getPeeledObjectId)
-          case _          => None
+          case s"$_-init" | s"$_/tags/basepoints/$_" => Option(basepoint.getPeeledObjectId)
+          case _                                     => None
         }
         val startRef = basepointSpec.getOrElse(mergeBase(repo, head, endRef))
 
         println(s"Ver=$ver Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
+
+
 
         val commits =
           git
@@ -260,64 +273,45 @@ object Generator {
         grouped
       }
 
-    // val releasedBuilds = fetchReleases(repoOwner, repoName).map(_.tag_name).toSet
-    // XXX GH limits the release API to max 1000 entries regardless of items per page or page count
-    //   To work around this, we list the Git tags which is required for a release and doesn't have
-    //   arbitrary API limits.
-    val releasedBuildsWithArch = Try {
-      val localRepo = Git.open(Paths.get(".").toFile)
-      localRepo.fetch().setTagOpt(TagOpt.FETCH_TAGS).setDepth(1).call()
-      localRepo
-        .tagList()
-        .call()
-        .asScala
-        .map(_.getName.stripPrefix("refs/tags/"))
-        .toSet
-    }.recover { case e: TransportException =>
-      Console.err.println(s"Using empty tag list: ${e.getMessage}")
-      Set.empty[String]
-    }.get
-
-
-    val allMissing = config.arches.map { arch =>
-      arch -> builds
+    val missing =
+      builds
         .map(_.fmtWithArch(arch))
         .filterNot(releasedBuildsWithArch.contains(_))
-    }
 
-    val totalMissing = allMissing.map(_._2.size).sum
-    val buildsPerJob = (totalMissing.toDouble / GHAMaxJobCount).ceil.toInt
+    arch -> (builds, missing)
+  }
 
-    println(s"Released builds = ${releasedBuildsWithArch.size} (total)")
+  archBuilds.foreach { case (arch, (builds, missing)) =>
+    val buildsPerJob = (missing.length.toDouble / GHAMaxJobCount).ceil.toInt
     println(s"Computed builds = ${builds.size} (total)")
     println(s"Max jobs =        $GHAMaxJobCount")
     println(s"Builds Per job =  $buildsPerJob")
 
-    allMissing.foreach { (arch, missing) =>
-      val matrix = if (missing.nonEmpty) {
-        val jobGrouped = missing.grouped(buildsPerJob).map(_.mkString(";")).toList
-        println(s"[$arch] Missing builds =  ${missing.size}")
-        println(s"[$arch] Total jobs =      ${jobGrouped.size}")
-        jobGrouped
-      } else Nil
+    val matrix = if (missing.nonEmpty) {
+      val jobGrouped = missing.grouped(buildsPerJob).map(_.mkString(";")).toList
+      println(s"[$arch] Missing builds =  ${missing.size}")
+      println(s"[$arch] Total jobs =      ${jobGrouped.size}")
+      jobGrouped
+    } else Nil
 
-      // XXX spaces break ::set-output in the action yaml for some reason, so no pretty print
-      writeText(Pickler.write(matrix), Paths.get(s"matrix-${config.name}-$arch.json"))
-      writeText(
-        Pickler.write(builds.map(b => b.fmtNoArch -> b).to(Map)),
-        Paths.get(s"builds-${config.name}-$arch.json")
-      )
-      writeText(Pickler.write(missing), Paths.get(s"missing-${config.name}-$arch.json"))
-    }
-    println("Build computed")
+    // XXX spaces break ::set-output in the action yaml for some reason, so no pretty print
+    writeText(Pickler.write(matrix), Paths.get(s"matrix-${config.name}-$arch.json"))
+    writeText(
+      Pickler.write(builds.map(b => b.fmtNoArch -> b).to(Map)),
+      Paths.get(s"builds-${config.name}-$arch.json")
+    )
+    writeText(Pickler.write(missing), Paths.get(s"missing-${config.name}-$arch.json"))
+  }
 
-    if (generateApi) {
-      val parent = Files.createDirectories(Paths.get(config.name))
-      println(s"Generating static APIs (${builds.size} entries) in $parent")
-      builds.foreach { b =>
-        writeText(Pickler.write(b), parent.resolve(s"${b.fmtNoArch}.json"))
-      }
-      println("API generated")
+  println("Build computed")
+
+  if (generateApi) {
+    val allBuilds = archBuilds.flatMap(_._2._1).distinct
+    val parent    = Files.createDirectories(Paths.get(config.name))
+    println(s"Generating static APIs (${allBuilds.size} entries) in $parent")
+    allBuilds.foreach { b =>
+      writeText(Pickler.write(b), parent.resolve(s"${b.fmtNoArch}.json"))
     }
+    println("API generated")
   }
 }

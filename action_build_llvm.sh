@@ -82,8 +82,7 @@ for build in "${builds_array[@]}"; do
 
   build_no_arch="${build%.*}"
 
-  builds_json="/host/builds.json"
-  [ -f "/host/builds-llvm.json" ] && builds_json="/host/builds-llvm.json"
+  builds_json="/host/builds-llvm-$(uname -m).json"
   hash=$(jq -r ".\"$build_no_arch\" | .hash" "$builds_json")
 
   # Commits before https://github.com/llvm/llvm-project/commit/7f5fe30a150e will only work with
