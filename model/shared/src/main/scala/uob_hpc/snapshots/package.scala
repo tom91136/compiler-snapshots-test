@@ -27,7 +27,9 @@ case class Build(
     date: Instant,
     hash: String,
     hashLength: Int,
-    changes: ArraySeq[(String, Instant, String)]
+    parent: Option[String],
+    changes: ArraySeq[(String, Instant, String)],
+    zeroChanges: Boolean
 ) derives ReadWriter {
   lazy val isoDate: String = date.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_DATE)
   def shortHash: String    = hash.substring(0, hashLength)

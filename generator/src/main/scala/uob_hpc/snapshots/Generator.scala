@@ -248,13 +248,12 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
           }
           .scanLeft[Option[(RevCommit, Build)]](None) { case (origin, (c, ident)) =>
             val changes = origin match {
-              case None         => ArraySeq.empty[(String, Instant, String)]
+              case None         => ArraySeq.empty[(RevCommit, Instant, String)]
               case Some((x, _)) =>
                 commits.dropWhile(_ != x).takeWhile(_ != c).reverse.to(ArraySeq).map { c =>
-                  val hash    = reader.abbreviate(c).name()
                   val date    = c.getCommitterIdent.getWhenAsInstant
                   val message = c.getShortMessage.replace("\n", "\\n").replace("`", "\\`")
-                  (hash, date, message)
+                  (c, date, message)
                 }
             }
             Some(
@@ -263,7 +262,9 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
                 date = ident.getWhenAsInstant,
                 hash = c.name(),
                 hashLength = reader.abbreviate(c).name().length,
-                changes = changes
+                parent = changes.headOption.map((c, _, _) => reader.abbreviate(c).name()),
+                changes = changes.map((c, date, message) => (reader.abbreviate(c).name(), date, message)),
+                zeroChanges = config.name == "gcc" && changes.forall(_._3 == "Daily bump.")
               )
             )
           }
@@ -274,17 +275,23 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
 
     val missing =
       builds
+        .filterNot(_.zeroChanges)
         .map(_.fmtWithArch(arch))
         .filterNot(releasedBuildsWithArch.contains(_))
 
-    arch -> (builds, missing)
+
+    arch -> (builds , missing)
   }
 
   val allMissing   = archBuilds.flatMap(_._2._2)
   val buildsPerJob = (allMissing.length.toDouble / GHAMaxJobCount).ceil.toInt
 
-  archBuilds.foreach { case (arch, (builds, pending)) =>
-    println(s"[$arch] Computed Builds = ${builds.size} (total)")
+  archBuilds.foreach { case (arch, (allBuilds, pending)) =>
+
+    val builds = allBuilds.filterNot(_.zeroChanges)
+
+    println(s"[$arch] Zero Change Builds = ${allBuilds.count(_.zeroChanges)} (total)")
+    println(s"[$arch] Computed Builds = ${builds.size} (total, non-zero)")
     println(s"[$arch] Builds Per Job =  $buildsPerJob")
 
     val matrix = if (pending.nonEmpty) {
