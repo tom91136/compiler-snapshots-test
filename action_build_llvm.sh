@@ -12,14 +12,14 @@ ccache --set-config=sloppiness=locale,time_macros
 ccache -M 10G
 ccache -s
 
-BUILDS=$1
+readonly BUILDS=$1
 
-dry=false
+readonly dry=false
 
 # shellcheck disable=SC2206
-builds_array=(${BUILDS//;/ }) # split by ws
+readonly builds_array=(${BUILDS//;/ }) # split by ws
 
-cmake_prefix="$PWD"
+readonly cmake_prefix="$PWD"
 
 build_cmake() {
   local cmake_major=$1
@@ -76,6 +76,21 @@ filter_cmake_list() {
   )
 }
 
+extract_cmake_set() {
+  local name="$1"
+  shift
+  local val f
+  for f in "$@"; do
+    [[ -f "$f" ]] || continue
+    val="$(sed -nE "s/^[[:space:]]*set[[:space:]]*\\(${name}[[:space:]]*([0-9]+)\\).*/\\1/p" "$f" | head -n1 || true)"
+    [[ -n "${val:-}" ]] && {
+      printf '%s\n' "$val"
+      return 0
+    }
+  done
+  return 1
+}
+
 for build in "${builds_array[@]}"; do
   dest_dir="/tmp/$build"
   dest_archive="/host/$build.squashfs"
@@ -87,25 +102,25 @@ for build in "${builds_array[@]}"; do
 
   # Commits before https://github.com/llvm/llvm-project/commit/7f5fe30a150e will only work with
   # CMake < 3.17 due to a bug in LLVM's ExternalProjectAdd.
-  TGT_FIX="7f5fe30a150e7e87d3fbe4da4ab0e76ec38b40b9"
+  readonly TGT_FIX="7f5fe30a150e7e87d3fbe4da4ab0e76ec38b40b9"
 
   # A syntax error in SVN r312500 (https://github.com/llvm/llvm-project/commit/9e68b734d6d0a98c672aebbe64956476cc140008)
   # that doesn't get instantiated due to another bug in old GCC builds (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=84012)
   # This got fixed in llvm-6 but was present in 5 and 4, possibly older version too
-  ORC_FIX="9e68b734d6d0a98c672aebbe64956476cc140008"
+  readonly ORC_FIX="9e68b734d6d0a98c672aebbe64956476cc140008"
 
   # Commits before SVN r291939 (https://github.com/llvm/llvm-project/commit/c6e4583dbbdc3112c9a04d35a161dc9b4657f607)
   # has a syntax error for capture names
-  CGF_FIX="c6e4583dbbdc3112c9a04d35a161dc9b4657f607"
+  readonly CGF_FIX="c6e4583dbbdc3112c9a04d35a161dc9b4657f607"
 
   # A syntax error in SVN r265828 (https://github.com/llvm/llvm-project/commit/69341e6abca92f7f118ee7bd99be0cdfc649386f)
   # where `hasMD` had no users up until that point
-  HMD_FIX="69341e6abca92f7f118ee7bd99be0cdfc649386f"
+  readonly HMD_FIX="69341e6abca92f7f118ee7bd99be0cdfc649386f"
 
   # Issue specific to GCC 14 macro expansion when compiling Clang,
   # Debian has a patch for 17-18 at https://salsa.debian.org/pkg-llvm-team/llvm-toolchain/-/blob/f83b695bae4af4361b6892203305cdb05b3f41ab/debian/patches/arm64-clang-gcc-14.patch
   # a "hack" landed upstream during 18
-  ARM_FIX="d54dfdd1b53ff72344287d250c2b67329792c840"
+  readonly ARM_FIX="d54dfdd1b53ff72344287d250c2b67329792c840"
 
   echo "Build   : $build"
   echo "Commit  : $hash"
@@ -123,6 +138,19 @@ for build in "${builds_array[@]}"; do
   git clean -ffdx
 
   echo "Source cloned, starting build step..."
+
+  readonly llvm_version_files=(
+    "llvm/CMakeLists.txt"
+    "cmake/Modules/LLVMVersion.cmake"
+  )
+  major="$(extract_cmake_set LLVM_VERSION_MAJOR "${llvm_version_files[@]}" || true)"
+  minor="$(extract_cmake_set LLVM_VERSION_MINOR "${llvm_version_files[@]}" || true)"
+
+  if [[ -z "${major:-}" || -z "${minor:-}" ]]; then
+    echo "ERROR: Could not determine LLVM version from source tree." >&2
+    exit 1
+  fi
+  echo "Detected LLVM version: $major.$minor"
 
   if git_is_ancestor "$TGT_FIX" "$hash"; then
     echo "Commit does not require CMake < 3.17, continuing..."
@@ -200,7 +228,8 @@ for build in "${builds_array[@]}"; do
     echo "Commit does not require patching TokenKinds.def, continuing..."
   else
     echo "Patching TokenKinds.def + 2 others"
-token_patch=$(cat <<'EOF'
+    token_patch=$(
+      cat <<'EOF'
 diff --git a/clang/include/clang/Basic/TokenKinds.def b/clang/include/clang/Basic/TokenKinds.def
 index ef0dad0f2dcd..4c3965ca24ed 100644
 --- a/clang/include/clang/Basic/TokenKinds.def
@@ -254,11 +283,11 @@ index b5813c6abc2b..3394e4d8594c 100644
    OS << "#undef KEYWORD_ATTRIBUTE\n";
  }
 EOF
-)
+    )
     if echo "$token_patch" | git apply -; then
-       echo "TokenKinds.def patched applied" 
+      echo "TokenKinds.def patched applied"
     else
-       echo "Warn: TokenKinds.def patch did not apply"
+      echo "Warn: TokenKinds.def patch did not apply"
     fi
   fi
 
@@ -288,8 +317,14 @@ EOF
       broken_pstl=true
     fi
 
+    enable_flang=false
+    if ((major >= 15)); then
+      enable_flang=true
+    fi
+
     working_projects="clang;lld;openmp"
     if [[ "$broken_pstl" == false ]]; then working_projects="$working_projects;pstl"; fi
+    if [[ "$enable_flang" == true ]]; then working_projects="$working_projects;flang"; fi
 
     project_to_build="$(filter_cmake_list "$working_projects" "%%/CMakeLists.txt")"
     echo "Using project list: $project_to_build"
@@ -301,14 +336,6 @@ EOF
     if ! grep -q "LLVM_ENABLE_PROJECTS" llvm/CMakeLists.txt; then
       echo "LLVM_ENABLE_PROJECTS missing, moving projects to the expected directories..."
       mkdir -p "llvm/projects" "llvm/tools"
-
-      # < 3.8  has busted openmp support, don't copy
-      major="$(sed -nE 's/^[[:space:]]*set[[:space:]]*\(LLVM_VERSION_MAJOR[[:space:]]*([0-9]+)\).*/\1/p' llvm/CMakeLists.txt | head -n1 || true)"
-      minor="$(sed -nE 's/^[[:space:]]*set[[:space:]]*\(LLVM_VERSION_MINOR[[:space:]]*([0-9]+)\).*/\1/p' llvm/CMakeLists.txt | head -n1 || true)"
-      if [ -z "${major:-}" ] || [ -z "${minor:-}" ]; then
-        echo "ERROR: Could not determine LLVM version from source tree." >&2
-        exit 1
-      fi
       case "${major}.${minor}" in
       3.8 | 3.9)
         echo "LLVM >= 3.8 detected, adding OpenMP"
@@ -347,7 +374,7 @@ EOF
 
       time LDFLAGS="-pthread" \
         CFLAGS="$flags" \
-        CXXFLAGS="$flags -include cstdint -include cstdlib -include string -include cstdio ${nowarn[*]}" \
+        CXXFLAGS="$flags -include cstdint -include cstdlib -include cstdio -include limits -include string ${nowarn[*]}" \
         cmake3 -S llvm -B build \
         -DCMAKE_C_COMPILER_LAUNCHER=ccache \
         -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \

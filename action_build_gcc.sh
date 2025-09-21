@@ -12,12 +12,12 @@ ccache --set-config=sloppiness=locale,time_macros
 ccache -M 10G
 ccache -s
 
-BUILDS=$1
+readonly BUILDS=$1
 
-dry=false
+readonly dry=false
 
 # shellcheck disable=SC2206
-builds_array=(${BUILDS//;/ }) # split by ws
+readonly builds_array=(${BUILDS//;/ }) # split by ws
 
 if [ ! -d gcc/.git ]; then
   rm -rf gcc
@@ -87,8 +87,20 @@ for build in "${builds_array[@]}"; do
     install_dir="$dest_dir/opt/$build"
     mkdir -p "$install_dir"
 
+    old_dir_format=false
+    if [[ -f gcc/config/i386/linux-unwind.h ]]; then
+      old_dir_format=true
+    fi
+
     extra=()
     flags="-O2 -g1 -gz=zlib -fno-omit-frame-pointer -gno-column-info -femit-struct-debug-reduced"
+    build_nproc=$(nproc)
+    install_nproc=$(nproc)
+
+    if [[ "$old_dir_format" == true ]]; then
+      flags="-O2 -g0"
+      install_nproc=1
+    fi
 
     if git_is_ancestor "$SAN_FIX" "$hash"; then
       echo "Commit does not require disabling ASAN support, continuing..."
@@ -101,16 +113,17 @@ for build in "${builds_array[@]}"; do
       echo "Commit does not require ucontext patch and alternative std flags, continuing..."
     else
       for arch in i386 aarch64; do
-        f="libgcc/config/$arch/linux-unwind.h"
-        echo "Patching $f"
-        awk '{
-          o=$0
-          gsub(/\<struct[[:space:]]+ucontext\>/,"ucontext_t")
-          if($0!=o) c=1
-          print
-        } END{ if(!c) exit 3 }' "$f" >tmp && mv tmp "$f"
+        for f in "libgcc/config/$arch/linux-unwind.h" "gcc/config/$arch/linux-unwind.h"; do
+          echo "Patching $f"
+          awk '{
+                  o=$0
+                  gsub(/\<struct[[:space:]]+ucontext\>/,"ucontext_t")
+                  if($0!=o) c=1
+                  print
+                } END{ if(!c) exit 3 }' "$f" >tmp && mv tmp "$f"
+        done
       done
-      extra+=(CXXFLAGS_FOR_TARGET="-O2 -g1" CFLAGS_FOR_TARGET="-O2 -g1")
+      extra+=(CXXFLAGS_FOR_TARGET="-O2 -g1" CFLAGS_FOR_TARGET="-O2 -g1" BOOT_CFLAGS="-O2 -g1")
       extra+=(CXX="ccache c++ -std=gnu++98")
       extra+=(CC="ccache cc -std=gnu89 -Wno-implicit-int -Wno-implicit-function-declaration")
     fi
@@ -154,10 +167,29 @@ for build in "${builds_array[@]}"; do
 
     {
 
-      time ./contrib/download_prerequisites --no-isl --no-verify
+      if [[ -x contrib/download_prerequisites ]]; then
+        time ./contrib/download_prerequisites --no-isl --no-verify
+      else
+        MPFR=mpfr-2.4.2
+        GMP=gmp-4.3.2
+        MPC=mpc-0.8.1
+        wget "ftp://gcc.gnu.org/pub/gcc/infrastructure/$MPFR.tar.bz2"
+        tar xjf "$MPFR.tar.bz2"
+        ln -sf "$MPFR" mpfr
+        wget "ftp://gcc.gnu.org/pub/gcc/infrastructure/$GMP.tar.bz2"
+        tar xjf "$GMP".tar.bz2
+        ln -sf "$GMP" gmp
+        wget "ftp://gcc.gnu.org/pub/gcc/infrastructure/$MPC.tar.gz"
+        tar xzf "$MPC.tar.gz"
+        ln -sf "$MPC" mpc
+
+        rm -f "$MPFR.tar.bz2" "$GMP.tar.bz2" "$MPC.tar.gz"
+      fi
+
       (
         cd build
         ../configure \
+          MAKEINFO=true \
           CXX="ccache c++" \
           CC="ccache cc" \
           CXXFLAGS="$flags" \
@@ -171,8 +203,8 @@ for build in "${builds_array[@]}"; do
           --without-isl \
           "${extra[@]}"
       )
-      time make --silent -C build -j "$(nproc)"
-      time make --silent -C build -j "$(nproc)" install DESTDIR="$dest_dir"
+      time make --silent -C build -j "$build_nproc"
+      time make --silent -C build -j "$install_nproc" install DESTDIR="$dest_dir"
 
     } 2>&1 | tee "$install_dir/build.log"
 
