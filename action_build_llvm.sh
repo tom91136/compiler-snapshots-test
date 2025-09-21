@@ -318,7 +318,8 @@ EOF
     fi
 
     enable_flang=false
-    if ((major >= 15)); then
+    if ((major >= 17)); then
+      # before 17 flang doesn't really work, see https://github.com/mesonbuild/meson/issues/12306
       enable_flang=true
     fi
 
