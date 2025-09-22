@@ -122,6 +122,10 @@ for build in "${builds_array[@]}"; do
   # a "hack" landed upstream during 18
   readonly ARM_FIX="d54dfdd1b53ff72344287d250c2b67329792c840"
 
+  # An option landed after this commit to limit the number of threads to use when building flang
+  # due to excessive memory usage (max ~6GB per file)
+  readonly FLANG_FIX="2e5ec1cc5b8ef30f04f53d927860184acf7150b3"
+
   echo "Build   : $build"
   echo "Commit  : $hash"
 
@@ -132,7 +136,7 @@ for build in "${builds_array[@]}"; do
     --progress \
     --no-recurse-submodules \
     --filter=blob:none \
-    origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX"
+    origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX"
 
   git checkout -f -q "$hash"
   git clean -ffdx
@@ -222,6 +226,49 @@ for build in "${builds_array[@]}"; do
       if($0!=o) c=1
       print
     } END{ if(!c) exit 3 }' "$f" >tmp && mv tmp "$f"
+  fi
+
+  if git_is_ancestor "$FLANG_FIX" "$hash"; then
+    echo "Commit does not require patching flang/CMakeList.txt"
+  else
+    f="flang/CMakeLists.txt"
+    echo "Patching $f"
+    awk '
+      { lines[NR] = $0 }
+      /set\(FLANG_PARALLEL_COMPILE_JOBS/ { seen = 1 }
+      END {
+        for (i = 1; i <= NR; ++i) {
+          print lines[i]
+          if (!seen && lines[i] ~ /^list\(REMOVE_DUPLICATES CMAKE_CXX_FLAGS\)\s*$/) {
+            print "set(FLANG_PARALLEL_COMPILE_JOBS CACHE STRING"
+            print "  \"The maximum number of concurrent compilation jobs for Flang (Ninja only)\")"
+            print "if (FLANG_PARALLEL_COMPILE_JOBS)"
+            print "  set_property(GLOBAL APPEND PROPERTY JOB_POOLS flang_compile_job_pool=${FLANG_PARALLEL_COMPILE_JOBS})"
+            print "endif()"
+            changed = 1
+          }
+        }
+        if (!changed) exit 3
+      }
+' "$f" >tmp && mv tmp "$f"
+    g="flang/cmake/modules/AddFlang.cmake"
+    echo "Patching $g"
+    awk '
+  { lines[NR] = $0 }
+  /JOB_POOL_COMPILE[[:space:]]+flang_compile_job_pool/ { seen = 1 }
+  END {
+    for (i = 1; i <= NR; ++i) {
+      print lines[i]
+      if (!seen && lines[i] ~ /^[[:space:]]*if[[:space:]]*\(TARGET[[:space:]]*\$\{name\}\)[[:space:]]*$/) {
+        print "  if (FLANG_PARALLEL_COMPILE_JOBS)"
+        print "    set_property(TARGET ${name} PROPERTY JOB_POOL_COMPILE flang_compile_job_pool)"
+        print "  endif()"
+        changed = 1
+      }
+    }
+    if (!changed) exit 3
+  }
+' "$g" >tmp && mv tmp "$g"
   fi
 
   if git_is_ancestor "$ARM_FIX" "$hash"; then
@@ -394,6 +441,9 @@ EOF
         -DLLVM_BUILD_EXAMPLES=OFF \
         -DLLVM_STATIC_LINK_CXX_STDLIB=ON \
         -DLIBOMP_USE_QUAD_PRECISION=OFF \
+        -DFLANG_INCLUDE_TESTS=OFF \
+        -DFLANG_INCLUDE_DOCS=OFF \
+        -DFLANG_PARALLEL_COMPILE_JOBS=2 \
         -DCMAKE_INSTALL_PREFIX="$install_dir" \
         "${extra[@]}" \
         -GNinja
