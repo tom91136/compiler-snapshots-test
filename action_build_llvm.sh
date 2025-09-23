@@ -45,6 +45,23 @@ build_cmake() {
   eval "cmake3() { \"$prefix/bin/cmake\" \"\$@\"; }"
 }
 
+build_ninja() {
+  local ninja_ver=1.13.1
+
+  wget -O "ninja-${ninja_ver}.tar.gz" \
+    "https://github.com/ninja-build/ninja/archive/refs/tags/v${ninja_ver}.tar.gz"
+  tar -xf "ninja-${ninja_ver}.tar.gz"
+
+  (
+    cd ninja-${ninja_ver}
+    cmake -Bbuild-cmake -DBUILD_TESTING=OFF
+    cmake --build build-cmake -j "$(nproc)"
+  )
+
+  export PATH="$PWD/ninja-${ninja_ver}/build-cmake:$PATH"
+  ninja --version
+}
+
 if [ ! -d llvm/.git ]; then
   rm -rf llvm
   git init llvm
@@ -370,6 +387,17 @@ EOF
       enable_flang=true
     fi
 
+    if [[ "$enable_flang" == true ]]; then
+      # In LLVM 21, the build itself includes fortran sources which requires newer ninja
+      build_ninja
+      # Horrible hack that injects the SCL toolchain which isn't detected during flang-rt as it uses the just-built clang
+      toolchain_root="$(dirname "$(dirname "$(command -v gcc)")")"
+      export CCC_OVERRIDE_OPTIONS="^--gcc-toolchain=$toolchain_root"
+    fi
+
+    flang_nproc="$(awk '/MemTotal:/ {m=int($2/1024/5000); if(m<2)m=2; print m}' /proc/meminfo)"
+    echo "Using $flang_nproc threads for FLANG_PARALLEL_COMPILE_JOBS"
+
     working_projects="clang;lld;openmp"
     if [[ "$broken_pstl" == false ]]; then working_projects="$working_projects;pstl"; fi
     if [[ "$enable_flang" == true ]]; then working_projects="$working_projects;flang"; fi
@@ -452,7 +480,8 @@ EOF
         -DLIBOMP_USE_QUAD_PRECISION=OFF \
         -DFLANG_INCLUDE_TESTS=OFF \
         -DFLANG_INCLUDE_DOCS=OFF \
-        -DFLANG_PARALLEL_COMPILE_JOBS=2 \
+        -DFLANG_RT_INCLUDE_TESTS=OFF \
+        -DFLANG_PARALLEL_COMPILE_JOBS="$flang_nproc" \
         -DCMAKE_INSTALL_PREFIX="$install_dir" \
         "${extra[@]}" \
         -GNinja
