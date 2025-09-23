@@ -415,6 +415,15 @@ EOF
       "-Wno-redundant-move"
       "-Wno-init-list-lifetime"
       "-Wno-dangling-reference"
+      "-Wno-overloaded-virtual"
+    )
+
+    includes=(
+      "-include cstdint"
+      "-include cstdlib"
+      "-include cstdio"
+      "-include limits"
+      "-include string"
     )
 
     cmake3 --version
@@ -422,7 +431,7 @@ EOF
 
       time LDFLAGS="-pthread" \
         CFLAGS="$flags" \
-        CXXFLAGS="$flags -include cstdint -include cstdlib -include cstdio -include limits -include string ${nowarn[*]}" \
+        CXXFLAGS="$flags ${includes[*]} ${nowarn[*]}" \
         cmake3 -S llvm -B build \
         -DCMAKE_C_COMPILER_LAUNCHER=ccache \
         -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \

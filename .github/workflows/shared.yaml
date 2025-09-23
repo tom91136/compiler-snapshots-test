@@ -102,6 +102,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Enable zram
+        run: |
+          sudo swapoff -a
+          sudo rm -f /mnt/swapfile
+          sudo apt-get install -y util-linux zram-config linux-modules-extra-$(uname -r)
+
+          sudo modprobe zram
+
+          totalmem=`LC_ALL=C free | grep -e "^Mem:" | sed -e 's/^Mem: *//' -e 's/  *.*//'`
+          mem=$((totalmem * 4 * 1024)) 
+
+          sudo sh -c "echo $mem > /sys/block/zram0/disksize"
+          sudo mkswap /dev/zram0
+          sudo swapon -p 5 /dev/zram0
+          sudo zramctl
+
       - name: Restore cached image
         id: restore-image
         uses: actions/cache@v4
