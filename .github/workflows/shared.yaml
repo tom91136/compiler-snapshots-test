@@ -122,15 +122,15 @@ jobs:
           sudo docker image prune --all --force
 
           APT_PARAMS='sudo apt -y -qq -o=Dpkg::Use-Pty=0'
-          $APT_PARAMS remove -y '^dotnet-.*'
-          $APT_PARAMS remove -y '^llvm-.*'
-          $APT_PARAMS remove -y '^php.*'
-          $APT_PARAMS remove -y '^mongodb-.*'
-          $APT_PARAMS remove -y '^mysql-.*'
-          $APT_PARAMS remove -y azure-cli google-* google-chrome-stable firefox mono-devel libgl1-mesa-dri
-          $APT_PARAMS autoremove --purge -y
-          $APT_PARAMS autoclean
-          $APT_PARAMS clean
+          $APT_PARAMS remove -y '^dotnet-.*'  || true
+          $APT_PARAMS remove -y '^llvm-.*'  || true
+          $APT_PARAMS remove -y '^php.*' || true
+          $APT_PARAMS remove -y '^mongodb-.*' || true
+          $APT_PARAMS remove -y '^mysql-.*' || true
+          $APT_PARAMS remove -y azure-cli google-* google-chrome-stable firefox mono-devel libgl1-mesa-dri || true
+          $APT_PARAMS autoremove --purge -y || true 
+          $APT_PARAMS autoclean  || true
+          $APT_PARAMS clean || true
 
       - { name: Stats, run: df -H && sudo fstrim -av, if: always() }
 
