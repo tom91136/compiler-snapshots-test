@@ -180,7 +180,7 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
     val repo    = git.getRepository
 
     val ignoreCommits = Files
-      .readAllLines(Paths.get(s"./ignore_commits.$arch"))
+      .readAllLines(Paths.get(s"./ignore_commits.${config.name}.$arch"))
       .asScala
       .map(_.trim)
       .filterNot(_.isBlank())
