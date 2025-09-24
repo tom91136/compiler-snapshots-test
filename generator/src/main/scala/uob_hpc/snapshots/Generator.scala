@@ -177,6 +177,8 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
 
   val archBuilds = config.arches.map { arch =>
 
+    val repo    = git.getRepository
+
     val ignoreCommits = Files
       .readAllLines(Paths.get(s"./ignore_commits.$arch"))
       .asScala
@@ -187,12 +189,30 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
       .sorted
       .toSeq
 
-    println(s"Ignoring the following commits for $arch: \n${ignoreCommits.mkString("\n")}")
+    println(s"Ignoring the following commits for $arch:\n${ignoreCommits.mkString("\n")}")
+
+    val expandedIgnores = ignoreCommits.map {
+      case x@s"$start..$end" =>
+		val startParents = Using(RevWalk(repo))(_.parseCommit(repo.resolve(start))).get.getParents
+		if (startParents.size != 1) {
+			throw RuntimeException("Ignored commit range ${start} has zero or more than one parents")
+		}
+        println("$start =>  Parent=${startParents.toList}")
+        x -> git
+          .log()
+          .addRange(startParents.head, repo.resolve(end))
+          .call()
+          .asScala
+          .toVector.map(_.getName)
+      case x =>x ->  Vector(x)
+    }
+    val concreteIgnores = expandedIgnores.flatMap(_._2)
+
+    println(s"Concrete ignores:\n${expandedIgnores.map((c, xs) => s"$c => ${xs.size} ${xs.head} ${xs.last} ").mkString("\n")}")
 
     val builds = basepoints.toVector
       .sortBy(_._1.toFloatOption)
       .flatMap { case (ver, basepoint) =>
-        val repo    = git.getRepository
         val reader  = repo.newObjectReader()
         val head    = resolveFirst(repo, "refs/heads/main", "refs/heads/master", "refs/heads/trunk", Constants.HEAD)
         val endSpec = branches.get(ver) match {
@@ -208,6 +228,8 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
 
         println(s"Ver=$ver Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
 
+
+
         val commits =
           git
             .log()
@@ -218,7 +240,7 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
             .sortBy(_.getCommitTime)
 
         val grouped = commits
-          .filterNot(c => ignoreCommits.exists(c.getName.startsWith(_)))
+          .filterNot(c => concreteIgnores.exists(c.getName.startsWith(_)))
           .filter { c =>
             config.requirePath match {
               case None       => true

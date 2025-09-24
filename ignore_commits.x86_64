@@ -1,2 +1,7 @@
 # list of commits to ignore
 
+# GCC fails due to incorrect Fortran lowering
+99b1b1fac08f2e62b6ef5486180a449396599ca9..d3cbcb233854574e23793c72a2af72d4d3bf94fe
+
+# GCC fails due to accidental calls to sphnix
+5e749ee3019d7917184af30dab8d09c933c0a4a1..cead52c9d94420a092add58f0d1521ece3f8ecfa

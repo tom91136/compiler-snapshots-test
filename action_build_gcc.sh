@@ -55,6 +55,11 @@ for build in "${builds_array[@]}"; do
   # see https://github.com/gcc-mirror/gcc/commit/df2a7a38f6f49656f08e0c34d7856b2709a9e5b6
   WINT_FIX="df2a7a38f6f49656f08e0c34d7856b2709a9e5b6"
 
+  # GCC added _FloatN support half way during the GCC 7 cycle, Glibc only has guards for GCC 7 so
+  # the first half of the 7.x branch won't build due to missing FloatN types, which was added in
+  # the following commit
+  FLTN_FIX="c65699efcce48d68ef57ab3ce7fc5420fac5cbf9"
+
   echo "Build   : $build"
   echo "Commit  : $hash"
 
@@ -87,12 +92,38 @@ for build in "${builds_array[@]}"; do
     install_dir="$dest_dir/opt/$build"
     mkdir -p "$install_dir"
 
+    ver=""
+    if [[ -r "gcc/BASE-VER" ]]; then
+      ver="$(head -n1 "gcc/BASE-VER" | tr -d '[:space:]')"
+    elif [[ -z "$ver" && -r "gcc/version.c" ]]; then
+      ver="$(awk -F'"' '/version_string/ {print $2; exit}' "gcc/version.c" | awk '{print $1}')"
+    fi
+    if [[ -z "${ver:-}" ]]; then
+      echo "ERROR: Could not determine LLVM version from source tree." >&2
+      exit 1
+    fi
+
+    major="$(awk -F. '{print $1}' <<<"$ver")"
+    minor="$(awk -F. '{print ($2 == "" ? 0 : $2)}' <<<"$ver")"
+    echo "Detected GCC version:  $major.$minor (ver=$ver)"
+
+    config_extra=()
+    target_extra=()
+
+    if [[ "$major" == "7" ]]; then
+      if git_is_ancestor "$FLTN_FIX" "$hash"; then
+        echo "Commit does not require spoofing xgcc version"
+      else
+        echo "Spoofing xgcc to version 6"
+        target_extra+=("-U__GNUC__" "-D__GNUC__=6")
+      fi
+    fi
+
     old_dir_format=false
     if [[ -f gcc/config/i386/linux-unwind.h ]]; then
       old_dir_format=true
     fi
 
-    extra=()
     flags="-O2 -g1 -gz=zlib -fno-omit-frame-pointer -gno-column-info -femit-struct-debug-reduced"
     build_nproc=$(nproc)
     install_nproc=$(nproc)
@@ -105,7 +136,7 @@ for build in "${builds_array[@]}"; do
     if git_is_ancestor "$SAN_FIX" "$hash"; then
       echo "Commit does not require disabling ASAN support, continuing..."
     else
-      extra+=("--disable-libsanitizer")
+      config_extra+=("--disable-libsanitizer")
       echo "Disabling ASAN support"
     fi
 
@@ -123,9 +154,8 @@ for build in "${builds_array[@]}"; do
                 } END{ if(!c) exit 3 }' "$f" >tmp && mv tmp "$f"
         done
       done
-      extra+=(CXXFLAGS_FOR_TARGET="-O2 -g1" CFLAGS_FOR_TARGET="-O2 -g1" BOOT_CFLAGS="-O2 -g1")
-      extra+=(CXX="ccache c++ -std=gnu++98")
-      extra+=(CC="ccache cc -std=gnu89 -Wno-implicit-int -Wno-implicit-function-declaration")
+      config_extra+=(CXX="ccache c++ -std=gnu++98")
+      config_extra+=(CC="ccache cc -std=gnu89 -Wno-implicit-int -Wno-implicit-function-declaration")
     fi
 
     if git_is_ancestor "$WINT_FIX" "$hash"; then
@@ -186,14 +216,31 @@ for build in "${builds_array[@]}"; do
         rm -f "$MPFR.tar.bz2" "$GMP.tar.bz2" "$MPC.tar.gz"
       fi
 
+      nowarn=(
+        "-Wno-switch"
+        "-Wno-nonnull"
+        "-Wno-use-after-free"
+        "-Wno-format-diag"
+        "-Wno-cast-function-type"
+        "-Wno-maybe-uninitialized"
+        "-Wno-implicit-fallthrough"
+        "-Wno-expansion-to-defined"
+        "-Wno-error=incompatible-pointer-types"
+      )
+
       (
         cd build
         ../configure \
           MAKEINFO=true \
           CXX="ccache c++" \
           CC="ccache cc" \
-          CXXFLAGS="$flags" \
-          CFLAGS="$flags -Wno-error=incompatible-pointer-types -Wno-maybe-uninitialized" \
+          CFLAGS_FOR_BUILD="$flags ${nowarn[*]}" \
+          CXXFLAGS_FOR_BUILD="$flags ${nowarn[*]}" \
+          CFLAGS_FOR_TARGET="-O2 -g1 ${target_extra[*]}" \
+          CXXFLAGS_FOR_TARGET="-O2 -g1 ${target_extra[*]}" \
+          CFLAGS="-O2 -g1" \
+          CXXFLAGS="-O2 -g1" \
+          BOOT_CFLAGS="-O2 -g1" \
           --prefix="/opt/$build" \
           --enable-languages=c,c++,fortran \
           --disable-nls \
@@ -201,7 +248,7 @@ for build in "${builds_array[@]}"; do
           --disable-multilib \
           --disable-libvtv \
           --without-isl \
-          "${extra[@]}"
+          "${config_extra[@]}"
       )
       time make --silent -C build -j "$build_nproc"
       time make --silent -C build -j "$install_nproc" install DESTDIR="$dest_dir"
