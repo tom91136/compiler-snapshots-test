@@ -1,0 +1,20 @@
+# list of commits to ignore
+
+# Stage 2 fails due to incorrect Fortran lowering
+99b1b1fac08f2e62b6ef5486180a449396599ca9..d3cbcb233854574e23793c72a2af72d4d3bf94fe
+
+# Build fails due to accidental calls to sphnix
+5e749ee3019d7917184af30dab8d09c933c0a4a1..cead52c9d94420a092add58f0d1521ece3f8ecfa
+
+# Broken MPFR
+fe108dad32f521c4f924a397f11c63f86519e183..1dfb5d8ab52c3c76c877077d8d6dc4eaae3c6153
+
+# Stage 2 failed due to ICE relating to float handing
+57b7c432cce893e1ba60d9b94a9606df6b419379..924326b3e0d75dbb246a4fbabfdd8be417788db8
+
+# collect2 SIGSEGV
+1e081edaadf33991b935c0934e591b3fad6a4b67..c7d22ee76f9231727d5e8c38f4f363b6cc7382ff
+
+
+# Initial wide-int landed and was broken
+807e902eea17f3132488c256c963823976b2348c..eba762930745e43af448961a38b0c607633820be

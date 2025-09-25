@@ -12,12 +12,12 @@ ccache --set-config=sloppiness=locale,time_macros
 ccache -M 10G
 ccache -s
 
-readonly BUILDS=$1
+readonly BUILDS=${1:-}
 
 readonly dry=false
 
 # shellcheck disable=SC2206
-readonly builds_array=(${BUILDS//;/ }) # split by ws
+builds_array=(${BUILDS//;/ }) # split by ws
 
 readonly cmake_prefix="$PWD"
 
@@ -62,11 +62,11 @@ build_ninja() {
   ninja --version
 }
 
-if [ ! -d llvm/.git ]; then
-  rm -rf llvm
-  git init llvm
+if [ ! -d /llvm/.git ]; then
+  rm -rf /llvm
+  git init /llvm
 fi
-cd llvm
+cd /llvm
 if git remote get-url origin &>/dev/null; then
   git remote set-url origin https://github.com/llvm/llvm-project.git
 else
@@ -108,14 +108,23 @@ extract_cmake_set() {
   return 1
 }
 
+if [[ ${#builds_array[@]} -eq 0 ]] && git rev-parse --git-dir &>/dev/null; then
+  commit="$(git rev-parse HEAD)"
+  echo "[bisect] Currently on commit $commit"
+  builds_array=("$commit")
+fi
+
 for build in "${builds_array[@]}"; do
   dest_dir="/tmp/$build"
   dest_archive="/host/$build.squashfs"
 
-  build_no_arch="${build%.*}"
-
-  builds_json="/host/builds-llvm-$(uname -m).json"
-  hash=$(jq -r ".\"$build_no_arch\" | .hash" "$builds_json")
+  if [[ "$build" == llvm-* ]]; then
+    build_no_arch="${build%.*}"
+    builds_json="/host/builds-llvm-$(uname -m).json"
+    hash=$(jq -r ".\"$build_no_arch\" | .hash" "$builds_json")
+  else
+    hash="$build"
+  fi
 
   # Commits before https://github.com/llvm/llvm-project/commit/7f5fe30a150e will only work with
   # CMake < 3.17 due to a bug in LLVM's ExternalProjectAdd.
@@ -146,16 +155,18 @@ for build in "${builds_array[@]}"; do
   echo "Build   : $build"
   echo "Commit  : $hash"
 
-  git -c protocol.version=2 fetch \
-    --quiet \
-    --no-tags \
-    --prune \
-    --progress \
-    --no-recurse-submodules \
-    --filter=blob:none \
-    origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX"
+  if [[ "$(git rev-parse HEAD)" != "$hash" ]]; then
+    git -c protocol.version=2 fetch \
+      --quiet \
+      --no-tags \
+      --prune \
+      --progress \
+      --no-recurse-submodules \
+      --filter=blob:none \
+      origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX"
+    git checkout -f -q "$hash"
+  fi
 
-  git checkout -f -q "$hash"
   git clean -ffdx
 
   echo "Source cloned, starting build step..."

@@ -175,40 +175,52 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
   println(s"Released Builds = ${releasedBuildsWithArch.size} (total)")
   println(s"Max Jobs =        $GHAMaxJobCount")
 
+  def readIgnores(f: Path) =
+    if (!Files.isRegularFile(f)) Seq.empty
+    else
+      Files
+        .readAllLines(f)
+        .asScala
+        .map(_.trim)
+        .filterNot(_.isBlank())
+        .filterNot(_.startsWith("#"))
+        .distinct
+        .sorted
+        .toSeq
+
+  val sharedIgnores = readIgnores(Paths.get(s"./ignore_commits.${config.name}"))
+
   val archBuilds = config.arches.map { arch =>
 
-    val repo    = git.getRepository
+    val repo = git.getRepository
 
-    val ignoreCommits = Files
-      .readAllLines(Paths.get(s"./ignore_commits.${config.name}.$arch"))
-      .asScala
-      .map(_.trim)
-      .filterNot(_.isBlank())
-      .filterNot(_.startsWith("#"))
-      .distinct
-      .sorted
-      .toSeq
+    val ignoreCommits = sharedIgnores ++ readIgnores(Paths.get(s"./ignore_commits.${config.name}.$arch"))
 
     println(s"Ignoring the following commits for $arch:\n${ignoreCommits.mkString("\n")}")
 
-    val expandedIgnores = ignoreCommits.map {
-      case x@s"$start..$end" =>
-		val startParents = Using(RevWalk(repo))(_.parseCommit(repo.resolve(start))).get.getParents
-		if (startParents.size != 1) {
-			throw RuntimeException("Ignored commit range ${start} has zero or more than one parents")
-		}
-        println("$start =>  Parent=${startParents.toList}")
+    val ignoredRevs = ignoreCommits.map {
+      case x @ s"$start..$end" =>
+        val startParents = Using(RevWalk(repo))(_.parseCommit(repo.resolve(start))).get.getParents
+        if (startParents.size != 1) {
+          throw RuntimeException(s"Ignored commit range ${start} has zero or more than one parents")
+        }
         x -> git
           .log()
           .addRange(startParents.head, repo.resolve(end))
           .call()
           .asScala
-          .toVector.map(_.getName)
-      case x =>x ->  Vector(x)
+          .toVector
+      case x => x -> Vector(Using(RevWalk(repo))(_.parseCommit(repo.resolve(x))).get)
     }
-    val concreteIgnores = expandedIgnores.flatMap(_._2)
+    val ignoredCommitNames = ignoredRevs.flatMap(_._2.map(_.getName))
 
-    println(s"Concrete ignores:\n${expandedIgnores.map((c, xs) => s"$c => ${xs.size} ${xs.head} ${xs.last} ").mkString("\n")}")
+    println(
+      s"Concrete ignores:\n${ignoredRevs.map { (c, xs) =>
+          val head = xs.head
+          val last = xs.last
+          s"$c => ${xs.size} $last..$head (${last.getAuthorIdent.getWhenAsInstant} => ${head.getAuthorIdent.getWhenAsInstant}}) "
+        }.mkString("\n")}"
+    )
 
     val builds = basepoints.toVector
       .sortBy(_._1.toFloatOption)
@@ -228,8 +240,6 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
 
         println(s"Ver=$ver Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
 
-
-
         val commits =
           git
             .log()
@@ -240,7 +250,7 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
             .sortBy(_.getCommitTime)
 
         val grouped = commits
-          .filterNot(c => concreteIgnores.exists(c.getName.startsWith(_)))
+          .filterNot(c => ignoredCommitNames.exists(c.getName.startsWith(_)))
           .filter { c =>
             config.requirePath match {
               case None       => true
@@ -301,8 +311,7 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
         .map(_.fmtWithArch(arch))
         .filterNot(releasedBuildsWithArch.contains(_))
 
-
-    arch -> (builds , missing)
+    arch -> (builds, missing)
   }
 
   val allMissing   = archBuilds.flatMap(_._2._2)

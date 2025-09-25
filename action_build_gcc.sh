@@ -12,18 +12,18 @@ ccache --set-config=sloppiness=locale,time_macros
 ccache -M 10G
 ccache -s
 
-readonly BUILDS=$1
+readonly BUILDS=${1:-}
 
 readonly dry=false
 
 # shellcheck disable=SC2206
-readonly builds_array=(${BUILDS//;/ }) # split by ws
+builds_array=(${BUILDS//;/ }) # split by ws
 
-if [ ! -d gcc/.git ]; then
-  rm -rf gcc
-  git init gcc
+if [ ! -d /gcc/.git ]; then
+  rm -rf /gcc
+  git init /gcc
 fi
-cd gcc
+cd /gcc
 if git remote get-url origin &>/dev/null; then
   git remote set-url origin https://github.com/gcc-mirror/gcc.git
 else
@@ -33,13 +33,23 @@ git config --local gc.auto 0
 
 git_is_ancestor() { git merge-base --is-ancestor "$1" "$2"; }
 
+if [[ ${#builds_array[@]} -eq 0 ]] && git rev-parse --git-dir &>/dev/null; then
+  commit="$(git rev-parse HEAD)"
+  echo "[bisect] Currently on commit $commit"
+  builds_array=("$commit")
+fi
+
 for build in "${builds_array[@]}"; do
   dest_dir="/tmp/$build"
   dest_archive="/host/$build.squashfs"
 
-  build_no_arch="${build%.*}"
-  builds_json="/host/builds-gcc-$(uname -m).json"
-  hash=$(jq -r ".\"$build_no_arch\" | .hash" "$builds_json")
+  if [[ "$build" == gcc-* ]]; then
+    build_no_arch="${build%.*}"
+    builds_json="/host/builds-gcc-$(uname -m).json"
+    hash=$(jq -r ".\"$build_no_arch\" | .hash" "$builds_json")
+  else
+    hash="$build"
+  fi
 
   # Commits before 71b55d45e4304f5e2e98ac30473c581f58fc486b requires an old glibc for asan to work
   # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113181
@@ -63,16 +73,18 @@ for build in "${builds_array[@]}"; do
   echo "Build   : $build"
   echo "Commit  : $hash"
 
-  git -c protocol.version=2 fetch \
-    --quiet \
-    --no-tags \
-    --prune \
-    --progress \
-    --no-recurse-submodules \
-    --filter=blob:none \
-    origin "$hash" "$SAN_FIX" "$UCTX_FIX" "$WINT_FIX"
+  if [[ "$(git rev-parse HEAD)" != "$hash" ]]; then
+    git -c protocol.version=2 fetch \
+      --quiet \
+      --no-tags \
+      --prune \
+      --progress \
+      --no-recurse-submodules \
+      --filter=blob:none \
+      origin "$hash" "$SAN_FIX" "$UCTX_FIX" "$WINT_FIX"
+    git checkout -f -q "$hash"
+  fi
 
-  git checkout -f -q "$hash"
   git clean -ffdx
 
   echo "Source cloned, starting build step..."
@@ -99,7 +111,7 @@ for build in "${builds_array[@]}"; do
       ver="$(awk -F'"' '/version_string/ {print $2; exit}' "gcc/version.c" | awk '{print $1}')"
     fi
     if [[ -z "${ver:-}" ]]; then
-      echo "ERROR: Could not determine LLVM version from source tree." >&2
+      echo "ERROR: Could not determine GCC version from source tree." >&2
       exit 1
     fi
 
