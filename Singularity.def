@@ -1,0 +1,16 @@
+Bootstrap: docker
+From: almalinux:8
+
+%post
+  dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+  dnf config-manager --set-enabled powertools
+  dnf install -y gcc-toolset-14 file bzip2 texinfo flex git jq ninja-build python39-devel cmake3 wget bison automake openssl-devel ccache squashfs-tools
+
+%runscript
+  if [ "$EUID" -ne 0 ]; then
+    echo "This container must be run with --fakeroot (effective UID 0)." && exit 1
+  fi
+  exec /bin/bash "$@"
+
+%startscript
+  exec /bin/bash "$@"

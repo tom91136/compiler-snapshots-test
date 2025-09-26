@@ -54,3 +54,17 @@ docker run --rm -it  -v $PWD:/host/:rw,z  build_image /bin/bash
 # Bisect example, where GOOD1->BAD->GOOD2, based on actions outcome
 [root@9fd6ab9e5ec7 /] REPO=gcc GOOD1=d656d82 BAD=1d10121 GOOD2=e64f7af /host/test_bisect.sh 
 ```
+
+Alternatively with Apptainer/Singularity:
+
+```shell
+apptainer build --force build_image.sif Singularity.def
+apptainer shell --compat --fakeroot --pwd=/ --bind "$PWD:/host:rw" build_image.sif
+# Testing a specific build
+Apptainer> /host/action_build_llvm.sh llvm-5.2017-07-30Z.397fe0b.x86_64
+# Testing a hash directly (full hash required)
+Apptainer> /host/action_build_llvm.sh 5408e6d64809fd035f781f10178765f724ac797b
+# Bisect example, where GOOD1->BAD->GOOD2, based on actions outcome
+Apptainer> REPO=gcc GOOD1=d656d82 BAD=1d10121 GOOD2=e64f7af /host/test_bisect.sh 
+
+```
