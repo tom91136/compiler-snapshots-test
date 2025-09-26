@@ -1,30 +1,20 @@
 package uob_hpc.snapshots
 
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
-import java.nio.file.StandardOpenOption
-import java.time.Instant
-import java.time.ZoneOffset
-import java.time.ZonedDateTime
-import java.time.temporal.IsoFields
-import scala.collection.immutable.ArraySeq
-import scala.jdk.CollectionConverters.*
-import scala.util.Try
-import scala.util.Using
-
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.errors.TransportException
-import org.eclipse.jgit.lib.Constants
-import org.eclipse.jgit.lib.ObjectId
-import org.eclipse.jgit.lib.Ref
-import org.eclipse.jgit.lib.Repository
-import org.eclipse.jgit.revwalk.RevCommit
-import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.lib.{Constants, ObjectId, Ref, Repository}
+import org.eclipse.jgit.revwalk.{RevCommit, RevWalk}
 import org.eclipse.jgit.revwalk.filter.RevFilter
 import org.eclipse.jgit.transport.TagOpt
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.treewalk.filter.PathFilter
+
+import java.nio.file.{Files, Path, Paths, StandardOpenOption}
+import java.time.{Instant, ZoneOffset, ZonedDateTime}
+import java.time.temporal.IsoFields
+import scala.collection.immutable.ArraySeq
+import scala.jdk.CollectionConverters.*
+import scala.util.{Try, Using}
 
 def writeText(xs: String, path: Path): Unit = Files.writeString(
   path,
@@ -86,25 +76,21 @@ val LLVM = Config(
   requirePath = Some("llvm/CMakeLists.txt")
 )
 
-def resolveFirst(repo: Repository, refs: String*): ObjectId =
-  refs.view
-    .map(repo.resolve)
-    .find(_ != null)
-    .getOrElse {
-      throw new IllegalStateException(s"None of ${refs.mkString(", ")} exist in ${repo.getDirectory}")
-    }
+def resolveFirst(repo: Repository, refs: String*): ObjectId = refs.view
+  .map(repo.resolve)
+  .find(_ != null)
+  .getOrElse {
+    throw IllegalStateException(s"None of ${refs.mkString(", ")} exist in ${repo.getDirectory}")
+  }
 
-def mergeBase(repo: Repository, a: ObjectId, b: ObjectId): RevCommit = {
-  val walk = new RevWalk(repo)
-  try {
-    walk.setRevFilter(RevFilter.MERGE_BASE)
-    walk.markStart(walk.parseCommit(a))
-    walk.markStart(walk.parseCommit(b))
-    val base = walk.next()
-    if (base == null) throw new IllegalStateException("No merge-base found")
-    base
-  } finally walk.close()
-}
+def mergeBase(repo: Repository, a: ObjectId, b: ObjectId): RevCommit = Using(RevWalk(repo)) { walk =>
+  walk.setRevFilter(RevFilter.MERGE_BASE)
+  walk.markStart(walk.parseCommit(a))
+  walk.markStart(walk.parseCommit(b))
+  val base = walk.next()
+  if (base == null) throw IllegalStateException("No merge-base found")
+  base
+}.get
 
 def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
   if (!Files.isRegularFile(f)) Vector.empty
@@ -253,6 +239,12 @@ def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
 
         val grouped = commits
           .filterNot(c => ignoredCommitNames.exists(c.getName.startsWith(_)))
+          .filter(c =>
+            c.getParents.toList match {
+              case p :: Nil => p.getCommitTime <= c.getCommitTime
+              case _        => false
+            }
+          )
           .filter { c =>
             config.requirePath match {
               case None       => true
@@ -333,6 +325,11 @@ def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
       scribe.info(s"[$arch] Total Jobs =      ${jobGrouped.size}")
       jobGrouped
     } else Nil
+
+    writeText(
+      Pickler.write(allBuilds.map(_.fmtWithArch(arch)), indent = 2),
+      Paths.get(s"all-${config.name}-$arch.json")
+    )
 
     // XXX spaces break ::set-output in the action yaml for some reason, so no pretty print
     writeText(Pickler.write(matrix), Paths.get(s"matrix-${config.name}-$arch.json"))

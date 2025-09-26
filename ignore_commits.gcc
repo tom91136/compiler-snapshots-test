@@ -20,3 +20,13 @@ fe108dad32f521c4f924a397f11c63f86519e183..1dfb5d8ab52c3c76c877077d8d6dc4eaae3c61
 
 # Syntax error in std::swap
 017360184d9eabff8d1479b3ed09bd1a5b11ff11..8964d2a090ffb96d822c8d3e5b533b5777285240
+
+# in progress
+# REPO=gcc GOOD1=6122336 BAD=ae242e3 GOOD2=314efb6 /host/test_bisect.sh # 5
+# REPO=gcc GOOD1=80bc9b6 BAD=56363ff GOOD2=08281ce /host/test_bisect.sh # 5
+# REPO=gcc GOOD1=eaacbd7 BAD=517d78b GOOD2=5b384b3 /host/test_bisect.sh #5
+# REPO=gcc GOOD1=8c07a5f BAD=52a70cc GOOD2=0a1d992 /host/test_bisect.sh # 6*2
+
+# TODO
+# REPO=gcc GOOD1=60ba7cd BAD=7b5f526 GOOD2=0a22eb9 /host/test_bisect.sh # 8
+# REPO=gcc GOOD1=c606743 BAD=b5be6d0 GOOD2=636b78f /host/test_bisect.sh #9
