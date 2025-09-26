@@ -1,9 +1,9 @@
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
-import org.typelevel.scalacoptions.ScalacOptions
 
 import org.scalajs.linker.interface.ESFeatures
 import org.scalajs.linker.interface.ESVersion
+import org.typelevel.scalacoptions.ScalacOptions
 
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
@@ -11,7 +11,7 @@ lazy val start = TaskKey[Unit]("start")
 lazy val dist  = TaskKey[File]("dist")
 
 lazy val scala3Version  = "3.7.2"
-lazy val upickleVersion = "4.3.0"
+lazy val upickleVersion = "4.3.2"
 lazy val munitVersion   = "1.0.0-M5"
 
 lazy val commonSettings = Seq(
@@ -52,10 +52,11 @@ lazy val model = crossProject(JSPlatform, JVMPlatform)
 lazy val generator = project
   .settings(
     commonSettings,
-    name := "generator",
+    name           := "generator",
+    outputStrategy := Some(StdoutOutput),
     libraryDependencies ++= Seq(
-      "org.slf4j"        % "slf4j-simple"     % "2.0.17",
       "org.eclipse.jgit" % "org.eclipse.jgit" % "7.3.0.202506031305-r",
+      "com.outr"        %% "scribe-slf4j"     % "3.17.0",
       "com.lihaoyi"     %% "upickle"          % upickleVersion
     ),
     Compile / packageBin / mainClass := Some("uob_hpc.Main"),

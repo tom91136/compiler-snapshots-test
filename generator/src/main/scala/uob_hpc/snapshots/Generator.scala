@@ -18,6 +18,7 @@ import org.eclipse.jgit.api.errors.TransportException
 import org.eclipse.jgit.lib.Constants
 import org.eclipse.jgit.lib.ObjectId
 import org.eclipse.jgit.lib.Ref
+import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.revwalk.RevWalk
 import org.eclipse.jgit.revwalk.filter.RevFilter
@@ -85,7 +86,7 @@ val LLVM = Config(
   requirePath = Some("llvm/CMakeLists.txt")
 )
 
-def resolveFirst(repo: org.eclipse.jgit.lib.Repository, refs: String*): ObjectId =
+def resolveFirst(repo: Repository, refs: String*): ObjectId =
   refs.view
     .map(repo.resolve)
     .find(_ != null)
@@ -93,7 +94,7 @@ def resolveFirst(repo: org.eclipse.jgit.lib.Repository, refs: String*): ObjectId
       throw new IllegalStateException(s"None of ${refs.mkString(", ")} exist in ${repo.getDirectory}")
     }
 
-def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): RevCommit = {
+def mergeBase(repo: Repository, a: ObjectId, b: ObjectId): RevCommit = {
   val walk = new RevWalk(repo)
   try {
     walk.setRevFilter(RevFilter.MERGE_BASE)
@@ -105,14 +106,52 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
   } finally walk.close()
 }
 
-@main def main(configName: String, generateApi: Boolean = false): Unit = {
+def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
+  if (!Files.isRegularFile(f)) Vector.empty
+  else {
+    val repo = git.getRepository
+    scribe.info(s"Reading ignore file: $f")
+    val resolved = Files
+      .readAllLines(f)
+      .asScala
+      .map(_.trim)
+      .filterNot(_.isBlank())
+      .filterNot(_.startsWith("#"))
+      .distinct
+      .sorted
+      .toVector.map {
+        case x @ s"$start..$end" =>
+          val startParents = Using(RevWalk(repo))(_.parseCommit(repo.resolve(start))).get.getParents
+          if (startParents.size != 1) {
+            throw RuntimeException(s"Ignored commit range $start has zero or more than one parents")
+          }
+          x -> git
+            .log()
+            .addRange(startParents.head, repo.resolve(end))
+            .call()
+            .asScala
+            .toVector
+        case x => x -> Vector(Using(RevWalk(repo))(_.parseCommit(repo.resolve(x))).get)
+      }
 
-  sys.props += ("org.slf4j.simpleLogger.logFile" -> "System.out"): Unit
+    scribe.info(
+      s"Ignoring the following commits for $f:\n${
+          resolved.map { (raw, xs) =>
+            val head = xs.head
+            val last = xs.last
+            s"$raw => ${xs.size} commits (${last.getAuthorIdent.getWhenAsInstant} => ${head.getAuthorIdent.getWhenAsInstant}}) "
+          }.mkString("\n")
+        }"
+    )
+    resolved
+  }
+
+@main def main(configName: String, generateApi: Boolean = false): Unit = {
 
   val config = configName.toLowerCase match {
     case "llvm" => LLVM
     case "gcc"  => GCC
-    case _      => Console.err.println(s"Unsupported config: $configName"); sys.exit(1)
+    case _      => scribe.error(s"Unsupported config: $configName"); sys.exit(1)
   }
 
   val repoDir = Paths.get(s"./${config.name}-bare").normalize().toAbsolutePath
@@ -168,59 +207,22 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
       .map(_.getName.stripPrefix("refs/tags/"))
       .toSet
   }.recover { case e: TransportException =>
-    Console.err.println(s"Using empty tag list: ${e.getMessage}")
+    scribe.error(s"Using empty tag list: ${e.getMessage}")
     Set.empty[String]
   }.get
 
-  println(s"Released Builds = ${releasedBuildsWithArch.size} (total)")
-  println(s"Max Jobs =        $GHAMaxJobCount")
+  scribe.info(s"Released Builds = ${releasedBuildsWithArch.size} (total)")
+  scribe.info(s"Max Jobs =        $GHAMaxJobCount")
 
-  def readIgnores(f: Path) =
-    if (!Files.isRegularFile(f)) Seq.empty
-    else
-      Files
-        .readAllLines(f)
-        .asScala
-        .map(_.trim)
-        .filterNot(_.isBlank())
-        .filterNot(_.startsWith("#"))
-        .distinct
-        .sorted
-        .toSeq
-
-  val sharedIgnores = readIgnores(Paths.get(s"./ignore_commits.${config.name}"))
+  val sharedIgnores = resolveIgnores(git, Paths.get(s"./ignore_commits.${config.name}"))
 
   val archBuilds = config.arches.map { arch =>
 
     val repo = git.getRepository
 
-    val ignoreCommits = sharedIgnores ++ readIgnores(Paths.get(s"./ignore_commits.${config.name}.$arch"))
+    val ignoreCommits = sharedIgnores ++ resolveIgnores(git, Paths.get(s"./ignore_commits.${config.name}.$arch"))
 
-    println(s"Ignoring the following commits for $arch:\n${ignoreCommits.mkString("\n")}")
-
-    val ignoredRevs = ignoreCommits.map {
-      case x @ s"$start..$end" =>
-        val startParents = Using(RevWalk(repo))(_.parseCommit(repo.resolve(start))).get.getParents
-        if (startParents.size != 1) {
-          throw RuntimeException(s"Ignored commit range ${start} has zero or more than one parents")
-        }
-        x -> git
-          .log()
-          .addRange(startParents.head, repo.resolve(end))
-          .call()
-          .asScala
-          .toVector
-      case x => x -> Vector(Using(RevWalk(repo))(_.parseCommit(repo.resolve(x))).get)
-    }
-    val ignoredCommitNames = ignoredRevs.flatMap(_._2.map(_.getName))
-
-    println(
-      s"Concrete ignores:\n${ignoredRevs.map { (c, xs) =>
-          val head = xs.head
-          val last = xs.last
-          s"$c => ${xs.size} $last..$head (${last.getAuthorIdent.getWhenAsInstant} => ${head.getAuthorIdent.getWhenAsInstant}}) "
-        }.mkString("\n")}"
-    )
+    val ignoredCommitNames = ignoreCommits.flatMap(_._2.map(_.getName))
 
     val builds = basepoints.toVector
       .sortBy(_._1.toFloatOption)
@@ -238,7 +240,7 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
         }
         val startRef = basepointSpec.getOrElse(mergeBase(repo, head, endRef))
 
-        println(s"Ver=$ver Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
+        scribe.info(s"Ver=$ver Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
 
         val commits =
           git
@@ -321,14 +323,14 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
 
     val builds = allBuilds.filterNot(_.zeroChanges)
 
-    println(s"[$arch] Zero Change Builds = ${allBuilds.count(_.zeroChanges)} (total)")
-    println(s"[$arch] Computed Builds = ${builds.size} (total, non-zero)")
-    println(s"[$arch] Builds Per Job =  $buildsPerJob")
+    scribe.info(s"[$arch] Zero Change Builds = ${allBuilds.count(_.zeroChanges)} (total)")
+    scribe.info(s"[$arch] Computed Builds = ${builds.size} (total, non-zero)")
+    scribe.info(s"[$arch] Builds Per Job =  $buildsPerJob")
 
     val matrix = if (pending.nonEmpty) {
       val jobGrouped = pending.grouped(buildsPerJob).map(_.mkString(";")).toList
-      println(s"[$arch] Pending Builds =  ${pending.size}")
-      println(s"[$arch] Total Jobs =      ${jobGrouped.size}")
+      scribe.info(s"[$arch] Pending Builds =  ${pending.size}")
+      scribe.info(s"[$arch] Total Jobs =      ${jobGrouped.size}")
       jobGrouped
     } else Nil
 
@@ -341,15 +343,15 @@ def mergeBase(repo: org.eclipse.jgit.lib.Repository, a: ObjectId, b: ObjectId): 
     writeText(Pickler.write(pending), Paths.get(s"missing-${config.name}-$arch.json"))
   }
 
-  println("Build computed")
+  scribe.info("Build computed")
 
   if (generateApi) {
     val allBuilds = archBuilds.flatMap(_._2._1).distinct
     val parent    = Files.createDirectories(Paths.get(config.name))
-    println(s"Generating static APIs (${allBuilds.size} entries) in $parent")
+    scribe.info(s"Generating static APIs (${allBuilds.size} entries) in $parent")
     allBuilds.foreach { b =>
       writeText(Pickler.write(b), parent.resolve(s"${b.fmtNoArch}.json"))
     }
-    println("API generated")
+    scribe.info("API generated")
   }
 }

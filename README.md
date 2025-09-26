@@ -38,3 +38,19 @@ The release notes can be received using the GitHub Release API:
 
 **Note:** It is not recommended to use the Release API for listing releases because GitHub caps the
 results to only 1k entries; many snapshots will be missing if enumerated this way.
+
+
+## Testing
+
+Testing a build locally: 
+
+```shell
+docker build -t build_image .
+docker run --rm -it  -v $PWD:/host/:rw,z  build_image /bin/bash
+# Testing a specific build
+[root@9fd6ab9e5ec7 /] /host/action_build_llvm.sh llvm-5.2017-07-30Z.397fe0b.x86_64
+# Testing a hash directly (full hash required)
+[root@9fd6ab9e5ec7 /] /host/action_build_llvm.sh 5408e6d64809fd035f781f10178765f724ac797b
+# Bisect example, where GOOD1->BAD->GOOD2, based on actions outcome
+[root@9fd6ab9e5ec7 /] REPO=gcc GOOD1=d656d82 BAD=1d10121 GOOD2=e64f7af /host/test_bisect.sh 
+```

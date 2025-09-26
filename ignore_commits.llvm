@@ -1,7 +1,7 @@
 # list of commits to ignore
 
 # Invalid conversion of raw_ostream to function pointer 
-04523994856fe7d0b858e56c0e434a5485165969
+8ca696481b67157e7f86ff55ad728ae4623a00eb..3285f10b34af45c0e192676e5ced3e5f115d7ec5
 
 # Undefined reference to SPIRVDialect symbol in mlir-opt
 7fc792cba7663b2aa54f259515319d74a5625be0..9567b33fa15e5349cb522a3b3e39abc300c7644c
@@ -9,13 +9,10 @@
 # Incorrect use of host compiler in place of stage 1 compiler
 16b7a0b43b386a0cfde65060394d5296345ce9bb..18fc39590978949fb75969e4bd63f8d2f13288ad
 
+# Missing/wrong path for CUFDialect in Flang
+6d50a79b721760fa5e10b81ebe6d1e37f141f61b..bdfb04a63d73c31ee75395064762d0d6ccb45819
 
-# TODO
-# Missing/wrong path for CUFDialect in Flang 
-# REPO=llvm GOOD1=b7ed097 BAD=d102ee6 GOOD2=558c519 /host/test_bisect.sh
-
-# TODO
 # Missing OpenMP tooling header
-# REPO=llvm GOOD1=45a061b BAD=d218789 GOOD2=a49030e /host/test_bisect.sh
+9b2b5bf8cd751fabccaca1b8847b4c291aa52081..cacab8a86fc2c6107cf7e9edb746f9634a6aa97a
 
 
