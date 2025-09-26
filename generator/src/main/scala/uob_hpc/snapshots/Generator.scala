@@ -50,7 +50,7 @@ val GCC = Config(
     case (s"refs/tags/releases/gcc-$maj.$min.0", ref) if maj.toIntOption.exists(_ < 5) => s"$maj.$min" -> ref
   },
   versionBranches = { case (s"refs/heads/releases/gcc-$ver", ref) => ver -> ref },
-  filter = _.toFloatOption.exists(_ >= 5.0) // see https://gcc.gnu.org/releases.html
+  filter = _.toFloatOption.exists(_ >= 4.0) // see https://gcc.gnu.org/releases.html
 )
 
 // LLVM has a similar pattern to GCC with basepoints and release branches for version >= 10.
