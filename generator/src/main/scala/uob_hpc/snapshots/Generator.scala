@@ -1,20 +1,30 @@
 package uob_hpc.snapshots
 
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.temporal.IsoFields
+import scala.collection.immutable.ArraySeq
+import scala.jdk.CollectionConverters.*
+import scala.util.Try
+import scala.util.Using
+
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.errors.TransportException
-import org.eclipse.jgit.lib.{Constants, ObjectId, Ref, Repository}
-import org.eclipse.jgit.revwalk.{RevCommit, RevWalk}
+import org.eclipse.jgit.lib.Constants
+import org.eclipse.jgit.lib.ObjectId
+import org.eclipse.jgit.lib.Ref
+import org.eclipse.jgit.lib.Repository
+import org.eclipse.jgit.revwalk.RevCommit
+import org.eclipse.jgit.revwalk.RevWalk
 import org.eclipse.jgit.revwalk.filter.RevFilter
 import org.eclipse.jgit.transport.TagOpt
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.treewalk.filter.PathFilter
-
-import java.nio.file.{Files, Path, Paths, StandardOpenOption}
-import java.time.{Instant, ZoneOffset, ZonedDateTime}
-import java.time.temporal.IsoFields
-import scala.collection.immutable.ArraySeq
-import scala.jdk.CollectionConverters.*
-import scala.util.{Try, Using}
 
 def writeText(xs: String, path: Path): Unit = Files.writeString(
   path,
@@ -34,7 +44,7 @@ case class Config(
     arches: Vector[String],
     basepointTags: IdPartialFn[(String, Ref)],
     versionBranches: IdPartialFn[(String, Ref)],
-    filter: String => Boolean,
+    filter: (String, String) => Boolean,
     requirePath: Option[String] = None
 )
 
@@ -50,7 +60,11 @@ val GCC = Config(
     case (s"refs/tags/releases/gcc-$maj.$min.0", ref) if maj.toIntOption.exists(_ < 5) => s"$maj.$min" -> ref
   },
   versionBranches = { case (s"refs/heads/releases/gcc-$ver", ref) => ver -> ref },
-  filter = _.toFloatOption.exists(_ >= 4.0) // see https://gcc.gnu.org/releases.html
+  filter = { // see https://gcc.gnu.org/releases.html
+    case (ver, "x86_64")  => ver.toFloatOption.exists(_ >= 4.0)
+    case (ver, "aarch64") => ver.toFloatOption.exists(_ >= 4.8) // aarch64 only really worked after 4.8
+    case (_, arch)        => throw IllegalArgumentException(s"Unsupported arch: $arch")
+  }
 )
 
 // LLVM has a similar pattern to GCC with basepoints and release branches for version >= 10.
@@ -72,7 +86,11 @@ val LLVM = Config(
 
   },
   versionBranches = { case (s"refs/heads/release/$ver.x", ref) => ver -> ref },
-  filter = _.toFloatOption.exists(_ >= 3.6f), // see https://releases.llvm.org/
+  filter = { // see https://releases.llvm.org/
+    case (ver, "x86_64")  => ver.toFloatOption.exists(_ >= 3.6f)
+    case (ver, "aarch64") => ver.toFloatOption.exists(_ >= 3.6f)
+    case (_, arch)        => throw IllegalArgumentException(s"Unsupported arch: $arch")
+  },
   requirePath = Some("llvm/CMakeLists.txt")
 )
 
@@ -158,24 +176,6 @@ def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
 
   val git = Git.open(repoDir.toFile)
 
-  val basepoints = git
-    .tagList()
-    .call()
-    .asScala
-    .map(r => r.getName -> r)
-    .collect(config.basepointTags)
-    .filter(x => config.filter(x._1))
-    .toMap
-
-  val branches = git
-    .branchList()
-    .call()
-    .asScala
-    .map(r => r.getName -> r)
-    .collect(config.versionBranches)
-    .filter(x => config.filter(x._1))
-    .toMap
-
   val now                = ZonedDateTime.now()
   val currentYearAndWeek = (now.get(IsoFields.WEEK_BASED_YEAR), now.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR))
 
@@ -203,12 +203,27 @@ def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
   val sharedIgnores = resolveIgnores(git, Paths.get(s"./ignore_commits.${config.name}"))
 
   val archBuilds = config.arches.map { arch =>
-
-    val repo = git.getRepository
-
-    val ignoreCommits = sharedIgnores ++ resolveIgnores(git, Paths.get(s"./ignore_commits.${config.name}.$arch"))
-
+    val repo               = git.getRepository
+    val ignoreCommits      = sharedIgnores ++ resolveIgnores(git, Paths.get(s"./ignore_commits.${config.name}.$arch"))
     val ignoredCommitNames = ignoreCommits.flatMap(_._2.map(_.getName))
+
+    val basepoints = git
+      .tagList()
+      .call()
+      .asScala
+      .map(r => r.getName -> r)
+      .collect(config.basepointTags)
+      .filter(x => config.filter(x._1, arch))
+      .toMap
+
+    val branches = git
+      .branchList()
+      .call()
+      .asScala
+      .map(r => r.getName -> r)
+      .collect(config.versionBranches)
+      .filter(x => config.filter(x._1, arch))
+      .toMap
 
     val builds = basepoints.toVector
       .sortBy(_._1.toFloatOption)

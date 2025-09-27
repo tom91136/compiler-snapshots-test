@@ -1,0 +1,17 @@
+# list of commits to ignore
+
+# Syntax: uid not declared in scope
+9afb455c25fabe799656b446eaa4511169339aad..da66d5964324bd5a3ce782f46a7d5e30137b5c20
+
+# ICE/SIGSEGV in unwind-dw2-fde-dip
+3f9f4ae70554ee0f7b756fc1d811aefb6e70f076..90988f773c8e516007ead0d0d602a7c1708ddc23
+
+# Conflicting mode_unit_size declaration
+8dc89e4d7ed340095fa0d27de5de584156b38c0b..e65bf4e814d38c87232445a9cb6f995678d70095
+
+# ICE: qsort checking failed
+9e686ea1c952dd513cf98c2cec464b3533ba763c..26596ee50d8506ec255784646a20e8edfa0ff3b4
+
+# TODO
+# REPO=gcc GOOD1=c606743 BAD=b5be6d0 GOOD2=636b78f /host/test_bisect.sh #9
+

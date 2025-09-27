@@ -70,6 +70,14 @@ for build in "${builds_array[@]}"; do
   # the following commit
   FLTN_FIX="c65699efcce48d68ef57ab3ce7fc5420fac5cbf9"
 
+  # Fixes SEGV in GCC 4.6~4.7 series, see
+  # https://github.com/gcc-mirror/gcc/commit/42001763ab5dc5d784f5af3599c7ecf98566fdad
+  SEGV_FIX="42001763ab5dc5d784f5af3599c7ecf98566fdad"
+
+  # Fixes pair escaping lexical scope, see
+  # https://github.com/gcc-mirror/gcc/commit/6e3f8a30262f988bd062a6662c0b0c61bd9e884a
+  SPAIR_FIX="6e3f8a30262f988bd062a6662c0b0c61bd9e884a"
+
   echo "Build   : $build"
   echo "Commit  : $hash"
 
@@ -81,8 +89,10 @@ for build in "${builds_array[@]}"; do
       --progress \
       --no-recurse-submodules \
       --filter=blob:none \
-      origin "$hash" "$SAN_FIX" "$UCTX_FIX" "$WINT_FIX"
+      origin "$hash" "$SAN_FIX" "$UCTX_FIX" "$WINT_FIX" "$FLTN_FIX" "$SEGV_FIX" "$SPAIR_FIX"
     git checkout -f -q "$hash"
+  else
+    git reset HEAD --hard
   fi
 
   git clean -ffdx
@@ -150,6 +160,39 @@ for build in "${builds_array[@]}"; do
     else
       config_extra+=("--disable-libsanitizer")
       echo "Disabling ASAN support"
+    fi
+
+    if git_is_ancestor "$SEGV_FIX" "$hash"; then
+      echo "Commit does not require patching ira-int.h, continuing..."
+    else
+      f="gcc/ira-int.h"
+      echo "Patching $f"
+      awk 'function ns(s){gsub(/[[:space:]]/,"",s);return s}
+        { if(ns($0)=="*o=ALLOCNO_OBJECT(a,i->n);"){getline l;if(ns(l)=="returni->n++<ALLOCNO_NUM_OBJECTS(a);"){
+        print "  int n = i->n++;"
+        print "  if (n < ALLOCNO_NUM_OBJECTS (a))"
+        print "    {"
+        print "      *o = ALLOCNO_OBJECT (a, n);"
+        print "      return true;"
+        print "    }"
+        print "  return false;";next} else{print $0;print l;next}} print }' "$f" >tmp && mv tmp "$f"
+    fi
+
+    if git_is_ancestor "$SPAIR_FIX" "$hash"; then
+      echo "Commit does not require patching gengtype.c, continuing..."
+    else
+      f="gcc/gengtype.c"
+      echo "Patching $f"
+      awk '
+        { L[++n]=$0 }
+        END{
+          for(i=1;i<=n;i++) if (L[i] ~ /struct[[:space:]]+pair[[:space:]]+newv;/){t=i;break}
+          if(!t){ for(i=1;i<=n;i++) print L[i]; exit }
+          for(i=t-1;i>=1;i--) if (index(L[i],"v && type == v->type")){a=i;break}
+          if(!a){ for(i=1;i<=n;i++) print L[i]; exit }
+          s=L[t]
+          for(i=1;i<=n;i++){ if(i==t) continue; print L[i]; if(i==a-1) print s }
+        }' "$f" >tmp && mv tmp "$f"
     fi
 
     if git_is_ancestor "$UCTX_FIX" "$hash"; then

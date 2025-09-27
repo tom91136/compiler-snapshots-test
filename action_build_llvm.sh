@@ -165,6 +165,8 @@ for build in "${builds_array[@]}"; do
       --filter=blob:none \
       origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX"
     git checkout -f -q "$hash"
+  else
+    git reset HEAD --hard
   fi
 
   git clean -ffdx
