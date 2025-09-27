@@ -15,4 +15,5 @@
 # Missing OpenMP tooling header
 9b2b5bf8cd751fabccaca1b8847b4c291aa52081..cacab8a86fc2c6107cf7e9edb746f9634a6aa97a
 
-
+# Syntax error in ISEL
+778826f0b8fb9f1a595ce8ab23faad6daa9466f5..4b62afca64a3f18cd57a3b3247330effd4b38098

@@ -87,7 +87,7 @@ val LLVM = Config(
   },
   versionBranches = { case (s"refs/heads/release/$ver.x", ref) => ver -> ref },
   filter = { // see https://releases.llvm.org/
-    case (ver, "x86_64")  => ver.toFloatOption.exists(_ >= 3.6f)
+    case (ver, "x86_64")  => ver.toFloatOption.exists(_ >= 3.0f)
     case (ver, "aarch64") => ver.toFloatOption.exists(_ >= 3.6f)
     case (_, arch)        => throw IllegalArgumentException(s"Unsupported arch: $arch")
   },

@@ -152,6 +152,9 @@ for build in "${builds_array[@]}"; do
   # due to excessive memory usage (max ~6GB per file)
   readonly FLANG_FIX="2e5ec1cc5b8ef30f04f53d927860184acf7150b3"
 
+  # Fix bad visibility for IntrusiveRefCntPtr<X>
+  readonly IRCP_FIX="a170697b18c3667a6ea70ea27246e69e202ba3a4"
+
   echo "Build   : $build"
   echo "Commit  : $hash"
 
@@ -163,7 +166,7 @@ for build in "${builds_array[@]}"; do
       --progress \
       --no-recurse-submodules \
       --filter=blob:none \
-      origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX"
+      origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX" "$IRCP_FIX"
     git checkout -f -q "$hash"
   else
     git reset HEAD --hard
@@ -231,17 +234,19 @@ for build in "${builds_array[@]}"; do
       '[\\&D, \\&BasePointersArray, \\&PointersArray,'
       '[\\&BasePointersArray, \\&PointersArray, \\&SizesArray,'
     )
-    for i in "${!pats[@]}"; do
-      tmp=$(mktemp)
-      # Don't fail, llvm 3.x won't match but is fine without this
-      if ! awk -v p="${pats[i]}" -v r="${reps[i]}" '{
+    if [[ -f "$f" ]]; then
+      for i in "${!pats[@]}"; do
+        tmp=$(mktemp)
+        # Don't fail, llvm 3.x won't match but is fine without this
+        if ! awk -v p="${pats[i]}" -v r="${reps[i]}" '{
           if(!done && sub(p, r)) done=1
           print
         } END{ exit (done ? 0 : 2) }' "$f" >"$tmp"; then
-        echo "Warning: no match for pattern ${pats[i]}" >&2
-      fi
-      mv "$tmp" "$f"
-    done
+          echo "Warning: no match for pattern ${pats[i]}" >&2
+        fi
+        mv "$tmp" "$f"
+      done
+    fi
   fi
 
   if git_is_ancestor "$HMD_FIX" "$hash"; then
@@ -299,6 +304,22 @@ for build in "${builds_array[@]}"; do
     if (!changed) exit 3
   }
 ' "$g" >tmp && mv tmp "$g"
+  fi
+
+  if git_is_ancestor "$IRCP_FIX" "$hash"; then
+    echo "Commit does not require patching IntrusiveRefCntPtr.h, continuing..."
+  else
+    f="llvm/include/llvm/ADT/IntrusiveRefCntPtr.h"
+    echo "Patching $f"
+    awk '{
+        print
+        if (!done && $0 ~ /void[[:space:]]+release\(\)/) {
+          match($0,/^[[:space:]]*/); ws=substr($0,RSTART,RLENGTH)
+          print ws "  template <typename X>"
+          print ws "  friend class IntrusiveRefCntPtr;"
+          done=1
+        }
+      }' "$f" >tmp && mv tmp "$f"
   fi
 
   if git_is_ancestor "$ARM_FIX" "$hash"; then
@@ -394,6 +415,19 @@ EOF
       broken_pstl=true
     fi
 
+    broken_lld=false
+    if ((major < 3 || (major == 3 && minor <= 5))); then
+      broken_lld=true
+    fi
+
+    if ((major < 3 || (major == 3 && minor <= 3))); then
+      extra+=("-DPYTHON_EXECUTABLE=/usr/bin/python2")
+    fi
+
+    if ((major < 3 || (major == 3 && minor <= 4))); then
+      extra+=("-DCMAKE_CXX_FLAGS="-std=gnu++11"")
+    fi
+
     enable_flang=false
     if ((major >= 17)); then
       # before 17 flang doesn't really work, see https://github.com/mesonbuild/meson/issues/12306
@@ -411,8 +445,9 @@ EOF
     flang_nproc="$(awk '/MemTotal:/ {m=int($2/1024/5000); if(m<2)m=2; print m}' /proc/meminfo)"
     echo "Using $flang_nproc threads for FLANG_PARALLEL_COMPILE_JOBS"
 
-    working_projects="clang;lld;openmp"
+    working_projects="clang;openmp"
     if [[ "$broken_pstl" == false ]]; then working_projects="$working_projects;pstl"; fi
+    if [[ "$broken_lld" == false ]]; then working_projects="$working_projects;lld"; fi
     if [[ "$enable_flang" == true ]]; then working_projects="$working_projects;flang"; fi
 
     project_to_build="$(filter_cmake_list "$working_projects" "%%/CMakeLists.txt")"
@@ -435,6 +470,7 @@ EOF
         ;;
       esac
       for proj in clang lld; do # copy the rest
+        if [[ "$broken_lld" == true ]] && [[ "$proj" == lld ]]; then continue; fi
         if [ -d "$proj" ]; then
           mv "$proj" llvm/tools/
         fi
