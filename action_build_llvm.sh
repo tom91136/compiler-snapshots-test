@@ -32,7 +32,7 @@ build_cmake() {
 
   if [ ! -x "$prefix/bin/cmake" ]; then
     # CMake needs openssl-devel, which is included in the build image
-    curl -L "https://cmake.org/files/${cmake_major}/cmake-${cmake_ver}.tar.gz" -o "$src_tar"
+    wget -O "$src_tar" "https://cmake.org/files/${cmake_major}/cmake-${cmake_ver}.tar.gz"
     tar xf "$src_tar" -C "$workdir"
     (
       cd "$src_dir"

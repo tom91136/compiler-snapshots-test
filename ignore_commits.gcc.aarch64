@@ -12,6 +12,5 @@
 # ICE: qsort checking failed
 9e686ea1c952dd513cf98c2cec464b3533ba763c..26596ee50d8506ec255784646a20e8edfa0ff3b4
 
-# TODO
-# REPO=gcc GOOD1=c606743 BAD=b5be6d0 GOOD2=636b78f /host/test_bisect.sh #9
-
+# Syntax: incorrect header
+e144a2b3066ecad2a7c934b1cd437d2afad0018f..efc3a1a101184a73718bcb034e530e57cd65a543

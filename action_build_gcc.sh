@@ -33,6 +33,52 @@ git config --local gc.auto 0
 
 git_is_ancestor() { git merge-base --is-ancestor "$1" "$2"; }
 
+build_bison() {
+  local bison_ver=2.7
+
+  wget "https://www.mirrorservice.org/sites/ftp.gnu.org/gnu/bison/bison-${bison_ver}.tar.xz"
+  tar -xf "bison-${bison_ver}.tar.xz"
+
+  (
+    cd "bison-${bison_ver}"
+    git apply <<'EOF'
+--- a/lib/stdio-impl.h
++++ b/lib/stdio-impl.h
+@@ -18,6 +18,12 @@
+    the same implementation of stdio extension API, except that some fields
+    have different naming conventions, or their access requires some casts.  */
+
++/* Glibc 2.28 made _IO_IN_BACKUP private.  For now, work around this
++   problem by defining it ourselves.  FIXME: Do not rely on glibc
++   internals.  */
++#if !defined _IO_IN_BACKUP && defined _IO_EOF_SEEN
++# define _IO_IN_BACKUP 0x100
++#endif
+
+ /* BSD stdio derived implementations.  */
+
+--- a/lib/fseterr.c
++++ b/lib/fseterr.c
+@@ -29,7 +29,7 @@
+   /* Most systems provide FILE as a struct and the necessary bitmask in
+      <stdio.h>, because they need it for implementing getc() and putc() as
+      fast macros.  */
+-#if defined _IO_ftrylockfile || __GNU_LIBRARY__ == 1 /* GNU libc, BeOS, Haiku, Linux libc5 */
++#if defined _IO_EOF_SEEN || __GNU_LIBRARY__ == 1 /* GNU libc, BeOS, Haiku, Linux libc5 */
+   fp->_flags |= _IO_ERR_SEEN;
+ #elif defined __sferror || defined __DragonFly__ /* FreeBSD, NetBSD, OpenBSD, DragonFly, Mac OS X, Cygwin */
+   fp_->_flags |= __SERR;
+EOF
+
+    mkdir build && cd build
+    ../configure --prefix="$PWD/dist"
+    make -j "$(nproc)" && make install
+  )
+
+  export PATH="$PWD/bison-${bison_ver}/build/dist/bin:$PATH"
+  bison --version
+}
+
 if [[ ${#builds_array[@]} -eq 0 ]] && git rev-parse --git-dir &>/dev/null; then
   commit="$(git rev-parse HEAD)"
   echo "[bisect] Currently on commit $commit"
@@ -129,6 +175,27 @@ for build in "${builds_array[@]}"; do
     minor="$(awk -F. '{print ($2 == "" ? 0 : $2)}' <<<"$ver")"
     echo "Detected GCC version:  $major.$minor (ver=$ver)"
 
+    if [[ -x contrib/download_prerequisites ]]; then
+      time ./contrib/download_prerequisites --no-isl --no-verify
+    else
+      MPFR=mpfr-2.4.2
+      GMP=gmp-4.3.2
+      MPC=mpc-0.8.1
+      wget "https://gcc.gnu.org/pub/gcc/infrastructure/$MPFR.tar.bz2"
+      tar xjf "$MPFR.tar.bz2"
+      ln -sf "$MPFR" mpfr
+      wget "https://gcc.gnu.org/pub/gcc/infrastructure/$GMP.tar.bz2"
+      tar xjf "$GMP".tar.bz2
+      ln -sf "$GMP" gmp
+      wget "https://gcc.gnu.org/pub/gcc/infrastructure/$MPC.tar.gz"
+      tar xzf "$MPC.tar.gz"
+      ln -sf "$MPC" mpc
+
+      rm -f "$MPFR.tar.bz2" "$GMP.tar.bz2" "$MPC.tar.gz"
+      :
+    fi
+
+    config_env_extra=()
     config_extra=()
     target_extra=()
 
@@ -139,6 +206,29 @@ for build in "${builds_array[@]}"; do
         echo "Spoofing xgcc to version 6"
         target_extra+=("-U__GNUC__" "-D__GNUC__=6")
       fi
+    fi
+
+    if ((major < 4 || (major == 4 && minor <= 0))); then
+      # GCC 4.0 and older needs Bison <= 2
+      build_bison
+    fi
+
+    fortran_target="fortran"
+    if ((major < 4 || (major == 4 && minor <= 2))); then
+      fortran_target="f95"
+      root=$PWD
+      config_extra+=("--with-mpfr=$root/mpfr/build/dist")
+      config_extra+=("--with-gmp=$root/gmp/build/dist")
+      for lib in gmp mpfr; do
+        (
+          cd "$root/$lib"
+          mkdir build && cd build
+          CXX="ccache c++ -std=gnu++98 -w" \
+            CC="ccache cc -std=gnu89 -w -Wno-implicit-int -Wno-implicit-function-declaration" \
+            ../configure --prefix="$PWD/dist" --disable-shared --with-gmp-build="$root/gmp/build"
+          make -j "$(nproc)" && make install
+        )
+      done
     fi
 
     old_dir_format=false
@@ -209,8 +299,8 @@ for build in "${builds_array[@]}"; do
                 } END{ if(!c) exit 3 }' "$f" >tmp && mv tmp "$f"
         done
       done
-      config_extra+=(CXX="ccache c++ -std=gnu++98")
-      config_extra+=(CC="ccache cc -std=gnu89 -Wno-implicit-int -Wno-implicit-function-declaration")
+      config_env_extra+=(CXX="ccache c++ -std=gnu++98")
+      config_env_extra+=(CC="ccache cc -std=gnu89 -Wno-implicit-int -Wno-implicit-function-declaration")
     fi
 
     if git_is_ancestor "$WINT_FIX" "$hash"; then
@@ -250,43 +340,23 @@ for build in "${builds_array[@]}"; do
       done
     fi
 
+    nowarn=(
+      "-Wno-switch"
+      "-Wno-nonnull"
+      "-Wno-use-after-free"
+      "-Wno-format-diag"
+      "-Wno-cast-function-type"
+      "-Wno-maybe-uninitialized"
+      "-Wno-implicit-fallthrough"
+      "-Wno-expansion-to-defined"
+      "-Wno-error=incompatible-pointer-types"
+    )
+
     {
-
-      if [[ -x contrib/download_prerequisites ]]; then
-        time ./contrib/download_prerequisites --no-isl --no-verify
-      else
-        MPFR=mpfr-2.4.2
-        GMP=gmp-4.3.2
-        MPC=mpc-0.8.1
-        wget "ftp://gcc.gnu.org/pub/gcc/infrastructure/$MPFR.tar.bz2"
-        tar xjf "$MPFR.tar.bz2"
-        ln -sf "$MPFR" mpfr
-        wget "ftp://gcc.gnu.org/pub/gcc/infrastructure/$GMP.tar.bz2"
-        tar xjf "$GMP".tar.bz2
-        ln -sf "$GMP" gmp
-        wget "ftp://gcc.gnu.org/pub/gcc/infrastructure/$MPC.tar.gz"
-        tar xzf "$MPC.tar.gz"
-        ln -sf "$MPC" mpc
-
-        rm -f "$MPFR.tar.bz2" "$GMP.tar.bz2" "$MPC.tar.gz"
-      fi
-
-      nowarn=(
-        "-Wno-switch"
-        "-Wno-nonnull"
-        "-Wno-use-after-free"
-        "-Wno-format-diag"
-        "-Wno-cast-function-type"
-        "-Wno-maybe-uninitialized"
-        "-Wno-implicit-fallthrough"
-        "-Wno-expansion-to-defined"
-        "-Wno-error=incompatible-pointer-types"
-      )
 
       (
         cd build
-        ../configure \
-          MAKEINFO=true \
+        env MAKEINFO=true \
           CXX="ccache c++" \
           CC="ccache cc" \
           CFLAGS_FOR_BUILD="$flags ${nowarn[*]}" \
@@ -296,8 +366,10 @@ for build in "${builds_array[@]}"; do
           CFLAGS="-O2 -g1" \
           CXXFLAGS="-O2 -g1" \
           BOOT_CFLAGS="-O2 -g1" \
+          "${config_env_extra[@]}" \
+          ../configure \
           --prefix="/opt/$build" \
-          --enable-languages=c,c++,fortran \
+          --enable-languages="c,c++,$fortran_target" \
           --disable-nls \
           --disable-bootstrap \
           --disable-multilib \
