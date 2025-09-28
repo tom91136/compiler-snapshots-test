@@ -1,2 +1,7 @@
 # list of commits to ignore
 
+# Errors in introduced in Two-level Distributed Barrier
+25073a4ecfc9b2e3cb76776185e63bfdb094cd98..bc8bb3df35223afeea62170b32f8ce9bd04255d4
+
+# Syntax error with KMP_HW_SUBSET
+df20599597079d620acb9ec2161fb54f838fbbb4..7787a8f1b7077d9efb53f5023fe044b70ad527b4

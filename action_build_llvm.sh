@@ -100,10 +100,9 @@ extract_cmake_set() {
   for f in "$@"; do
     [[ -f "$f" ]] || continue
     val="$(sed -nE "s/^[[:space:]]*set[[:space:]]*\\(${name}[[:space:]]*([0-9]+)\\).*/\\1/p" "$f" | head -n1 || true)"
-    [[ -n "${val:-}" ]] && {
-      printf '%s\n' "$val"
-      return 0
-    }
+    [[ -n "${val:-}" ]] && printf '%s\n' "$val" && return 0
+    val="$(sed -nE "s/^[[:space:]]*set[[:space:]]*\\(${name}[[:space:]]*\"?([0-9]+(\\.[0-9]+)?)\"?\\).*/\\1/p" "$f" | head -n1 || true)"
+    [[ -n "${val:-}" ]] && printf '%s\n' "$val" && return 0
   done
   return 1
 }
@@ -152,9 +151,6 @@ for build in "${builds_array[@]}"; do
   # due to excessive memory usage (max ~6GB per file)
   readonly FLANG_FIX="2e5ec1cc5b8ef30f04f53d927860184acf7150b3"
 
-  # Fix bad visibility for IntrusiveRefCntPtr<X>
-  readonly IRCP_FIX="a170697b18c3667a6ea70ea27246e69e202ba3a4"
-
   echo "Build   : $build"
   echo "Commit  : $hash"
 
@@ -166,7 +162,7 @@ for build in "${builds_array[@]}"; do
       --progress \
       --no-recurse-submodules \
       --filter=blob:none \
-      origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX" "$IRCP_FIX"
+      origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX"
     git checkout -f -q "$hash"
   else
     git reset HEAD --hard
@@ -182,6 +178,12 @@ for build in "${builds_array[@]}"; do
   )
   major="$(extract_cmake_set LLVM_VERSION_MAJOR "${llvm_version_files[@]}" || true)"
   minor="$(extract_cmake_set LLVM_VERSION_MINOR "${llvm_version_files[@]}" || true)"
+
+  if [[ -z "${major:-}" || -z "${minor:-}" ]]; then
+    if ver="$(extract_cmake_set PACKAGE_VERSION "${llvm_version_files[@]}" || true)"; then
+      IFS=. read -r major minor _ <<<"$ver"
+    fi
+  fi
 
   if [[ -z "${major:-}" || -z "${minor:-}" ]]; then
     echo "ERROR: Could not determine LLVM version from source tree." >&2
@@ -306,22 +308,6 @@ for build in "${builds_array[@]}"; do
 ' "$g" >tmp && mv tmp "$g"
   fi
 
-  if git_is_ancestor "$IRCP_FIX" "$hash"; then
-    echo "Commit does not require patching IntrusiveRefCntPtr.h, continuing..."
-  else
-    f="llvm/include/llvm/ADT/IntrusiveRefCntPtr.h"
-    echo "Patching $f"
-    awk '{
-        print
-        if (!done && $0 ~ /void[[:space:]]+release\(\)/) {
-          match($0,/^[[:space:]]*/); ws=substr($0,RSTART,RLENGTH)
-          print ws "  template <typename X>"
-          print ws "  friend class IntrusiveRefCntPtr;"
-          done=1
-        }
-      }' "$f" >tmp && mv tmp "$f"
-  fi
-
   if git_is_ancestor "$ARM_FIX" "$hash"; then
     echo "Commit does not require patching TokenKinds.def, continuing..."
   else
@@ -389,6 +375,66 @@ EOF
     fi
   fi
 
+  if ((major == 3 && minor <= 5)); then
+    # XXX@ Fix bad visibility for IntrusiveRefCntPtr<X>
+    # readonly IRCP_FIX="a170697b18c3667a6ea70ea27246e69e202ba3a4"
+    # This is prevalent in < 3.5 so just do it for all those
+    f="llvm/include/llvm/ADT/IntrusiveRefCntPtr.h"
+    echo "Patching $f"
+    awk '{
+        print
+        if (!done && $0 ~ /void[[:space:]]+release\(\)/) {
+          match($0,/^[[:space:]]*/); ws=substr($0,RSTART,RLENGTH)
+          print ws "  template <typename X>"
+          print ws "  friend class IntrusiveRefCntPtr;"
+          done=1
+        }
+      }' "$f" >tmp && mv tmp "$f"
+  else
+    echo "Commit does not require patching IntrusiveRefCntPtr.h, continuing..."
+  fi
+
+  if ((major == 3 && minor <= 1)); then
+    f="clang/lib/CodeGen/CGDebugInfo.cpp"
+    echo "Patching $f"
+    awk '{
+      if ($0 ~ /ReplaceMap\.push_back\(std::make_pair\(Ty.getAsOpaquePtr\(\),/) {
+        sub(/ReplaceMap\.push_back\(std::make_pair\(Ty.getAsOpaquePtr\(\),[ \t]*/,
+            "ReplaceMap.push_back(std::make_pair(Ty.getAsOpaquePtr(), llvm::WeakVH(")
+        sub(/\)\);$/, ")));")
+      }
+      print
+    }' "$f" >tmp && mv tmp "$f"
+    f="llvm/tools/bugpoint/ToolRunner.cpp"
+    echo "Patching $f"
+    awk '{
+      if ($0 ~ /errs\(\) *<< *OS *;/) sub(/OS *;/,"OS.str();");
+      print
+      }' "$f" >tmp && mv tmp "$f"
+  else
+    echo "Version does not require patching CGDebugInfo.cpp, continuing..."
+    echo "Version does not require patching ToolRunner.cpp, continuing..."
+  fi
+
+  if ((major == 3 && minor == 0)); then
+    f="llvm/include/llvm/ADT/PointerUnion.h"
+    echo "Patching $f"
+    awk '{
+          gsub(/Ty\(Val\)\.is</,  "Ty(Val).template is<");
+          gsub(/Ty\(Val\)\.get</, "Ty(Val).template get<");
+          print
+        }' "$f" >"$f.new" && mv "$f.new" "$f"
+
+    f="llvm/include/llvm/ADT/IntervalMap.h"
+    echo "Patching $f"
+    awk '{
+        gsub(/this->map->newNode</,"this->map->template newNode<");
+        print
+        }' "$f" >"$f.new" && mv "$f.new" "$f"
+  else
+    echo "Commit does not require patching PointerUnion.h, continuing..."
+  fi
+
   if $dry; then
     echo "Dry run, creating dummy artefact..."
     mkdir -p "$dest_dir"
@@ -406,7 +452,38 @@ EOF
     mkdir -p "$install_dir"
 
     extra=()
-    flags="-g1 -gz=zlib -fno-omit-frame-pointer -gno-column-info -femit-struct-debug-reduced"
+    nowarn=(
+      "-Wno-template-id-cdtor"
+      "-Wno-missing-template-keyword"
+      "-Wno-attributes"
+      "-Wno-maybe-uninitialized"
+      "-Wno-deprecated-declarations"
+      "-Wno-class-memaccess"
+      "-Wno-cast-function-type"
+      "-Wno-redundant-move"
+      "-Wno-init-list-lifetime"
+      "-Wno-dangling-reference"
+      "-Wno-overloaded-virtual"
+    )
+
+    includes=(
+      "-include cstdint"
+      "-include cstdlib"
+      "-include cstdio"
+      "-include limits"
+      "-include string"
+    )
+
+    cflags=()
+    cxxflags=()
+
+    flags=(
+      -g1
+      -gz=zlib
+      -fno-omit-frame-pointer
+      -gno-column-info
+      -femit-struct-debug-reduced
+    )
 
     broken_pstl=false
     if [[ ! -f pstl/CMakeLists.txt ]]; then
@@ -425,7 +502,8 @@ EOF
     fi
 
     if ((major < 3 || (major == 3 && minor <= 4))); then
-      extra+=("-DCMAKE_CXX_FLAGS="-std=gnu++11"")
+      cxxflags+=("-std=gnu++11")
+      includes+=("-include time.h")
     fi
 
     enable_flang=false
@@ -481,34 +559,12 @@ EOF
       extra+=("-DLLVM_INSTALL_TOOLCHAIN_ONLY=ON")
     fi
 
-    nowarn=(
-      "-Wno-template-id-cdtor"
-      "-Wno-missing-template-keyword"
-      "-Wno-attributes"
-      "-Wno-maybe-uninitialized"
-      "-Wno-deprecated-declarations"
-      "-Wno-class-memaccess"
-      "-Wno-cast-function-type"
-      "-Wno-redundant-move"
-      "-Wno-init-list-lifetime"
-      "-Wno-dangling-reference"
-      "-Wno-overloaded-virtual"
-    )
-
-    includes=(
-      "-include cstdint"
-      "-include cstdlib"
-      "-include cstdio"
-      "-include limits"
-      "-include string"
-    )
-
     cmake3 --version
     {
 
       time LDFLAGS="-pthread" \
-        CFLAGS="$flags" \
-        CXXFLAGS="$flags ${includes[*]} ${nowarn[*]}" \
+        CFLAGS="${cflags[*]} ${flags[*]}" \
+        CXXFLAGS="${cxxflags[*]} ${flags[*]} ${includes[*]} ${nowarn[*]}" \
         cmake3 -S llvm -B build \
         -DCMAKE_C_COMPILER_LAUNCHER=ccache \
         -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \

@@ -11,6 +11,7 @@
 
 # Missing/wrong path for CUFDialect in Flang
 6d50a79b721760fa5e10b81ebe6d1e37f141f61b..bdfb04a63d73c31ee75395064762d0d6ccb45819
+b5af667b01458e9083256f2614df175916c73e5a..0f8a74732aa352e5e6dfbf74a53f015b772c5743
 
 # Missing OpenMP tooling header
 9b2b5bf8cd751fabccaca1b8847b4c291aa52081..cacab8a86fc2c6107cf7e9edb746f9634a6aa97a
