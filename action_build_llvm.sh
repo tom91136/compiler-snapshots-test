@@ -151,6 +151,10 @@ for build in "${builds_array[@]}"; do
   # due to excessive memory usage (max ~6GB per file)
   readonly FLANG_FIX="2e5ec1cc5b8ef30f04f53d927860184acf7150b3"
 
+  # Flang has a bug where if LLVM_INSTALL_TOOLCHAIN_ONLY=ON is set, the required MLIR DSO is not installed
+  # and we end up with a non-functional flang binary, see https://github.com/llvm/llvm-project/commit/69d0bd56ad064df569cd065902fb7036f0311c0a
+  readonly MLIR_FIX="69d0bd56ad064df569cd065902fb7036f0311c0a"
+
   echo "Build   : $build"
   echo "Commit  : $hash"
 
@@ -162,7 +166,7 @@ for build in "${builds_array[@]}"; do
       --progress \
       --no-recurse-submodules \
       --filter=blob:none \
-      origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX"
+      origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX" "$MLIR_FIX"
     git checkout -f -q "$hash"
   else
     git reset HEAD --hard
@@ -306,6 +310,30 @@ for build in "${builds_array[@]}"; do
     if (!changed) exit 3
   }
 ' "$g" >tmp && mv tmp "$g"
+  fi
+
+  if git_is_ancestor "$MLIR_FIX" "$hash"; then
+    echo "Commit does not require patching AddMLIR.cmake"
+  else
+    f="mlir/cmake/modules/AddMLIR.cmake"
+    echo "Patching $f"
+    awk '
+    /target_link_libraries\(\$\{name\} INTERFACE \${LLVM_COMMON_LIBS}\)/ && !ins1 {
+      print
+      print "    if(ARG_INSTALL_WITH_TOOLCHAIN)"
+      print "      set_target_properties(${name} PROPERTIES MLIR_INSTALL_WITH_TOOLCHAIN TRUE)"
+      print "    endif()"
+      ins1=1; next
+    }
+    $0 ~ /^function\s*\(\s*add_mlir_library_install\s+name\s*\)/ { in_install=1 }
+    in_install && $0 ~ /^\s*if\s*\(\s*NOT\s+LLVM_INSTALL_TOOLCHAIN_ONLY\s*\)/ && !ins2 {
+      print "  get_target_property(_install_with_toolchain ${name} MLIR_INSTALL_WITH_TOOLCHAIN)"
+      sub(/\)\s*$/, " OR _install_with_toolchain)")
+      print
+      ins2=1; next
+    }
+    in_install && $0 ~ /^endfunction/ { in_install=0 }
+    { print } ' "$f" >"$f.new" && mv "$f.new" "$f"
   fi
 
   if git_is_ancestor "$ARM_FIX" "$hash"; then
@@ -608,11 +636,11 @@ EOF
   mksquashfs "$dest_dir" "$dest_archive" \
     -comp xz "${filter[@]}" -Xdict-size 1M -b 1M -always-use-fragments -all-root -no-xattrs -noappend -processors "$(nproc)"
 
-  echo ""
-  du -sh "$dest_dir"
-  du -sh "$dest_archive"
-
-  rm -rf "$dest_dir"
+  #  echo ""
+  #  du -sh "$dest_dir"
+  #  du -sh "$dest_archive"
+  #
+  #  rm -rf "$dest_dir"
   ccache -s
 
 done
