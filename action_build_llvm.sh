@@ -463,6 +463,31 @@ EOF
     echo "Commit does not require patching PointerUnion.h, continuing..."
   fi
 
+  {
+    f="llvm/cmake/modules/AddLLVM.cmake"
+    echo "Patching $f"
+    awk '
+      /^[[:space:]]*set[[:space:]]*\([[:space:]]*LLVM_TOOLCHAIN_TOOLS([[:space:]]|$)/ && !done {
+        match($0,/^[[:space:]]*/)
+        indent = substr($0, RSTART, RLENGTH)
+        print
+        print indent "  llc"
+        print indent "  lli"
+        print indent "  opt"
+        print indent "  llvm-as"
+        print indent "  llvm-config"
+        print indent "  llvm-diff"
+        print indent "  llvm-dis"
+        print indent "  llvm-dwarfdump"
+        print indent "  llvm-extract"
+        print indent "  llvm-link"
+        done=1
+        next
+      }
+      { print }
+    ' "$f" >tmp && mv tmp "$f"
+  }
+
   if $dry; then
     echo "Dry run, creating dummy artefact..."
     mkdir -p "$dest_dir"
@@ -636,11 +661,11 @@ EOF
   mksquashfs "$dest_dir" "$dest_archive" \
     -comp xz "${filter[@]}" -Xdict-size 1M -b 1M -always-use-fragments -all-root -no-xattrs -noappend -processors "$(nproc)"
 
-  #  echo ""
-  #  du -sh "$dest_dir"
-  #  du -sh "$dest_archive"
-  #
-  #  rm -rf "$dest_dir"
+  echo ""
+  du -sh "$dest_dir"
+  du -sh "$dest_archive"
+
+  rm -rf "$dest_dir"
   ccache -s
 
 done
