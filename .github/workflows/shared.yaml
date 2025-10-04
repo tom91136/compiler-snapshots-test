@@ -9,6 +9,9 @@ on:
       build_script:
         required: true
         type: string
+      upstream:
+        required: true
+        type: string
 
 # Just give up if we have a new commit
 concurrency:
@@ -173,6 +176,7 @@ jobs:
           JOBS: ${{ matrix.jobs }}
           BUILD_SCRIPT: ${{ inputs.build_script }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM: ${{ inputs.upstream }}
         run: |
           set -uo pipefail  # no -e: keep going
           IFS=';' read -r -a jobs <<< "$JOBS"

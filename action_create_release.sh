@@ -34,8 +34,18 @@ for build in "${builds_array[@]}"; do
   build_no_arch="${build%.*}"
   config="${build%%-*}"
   source="builds-$config-$(uname -m).json"
-  # XXX make sure it's quoted, so no `-r`
-  quoted_changes=$(jq "[ .\"$build_no_arch\" | .changes | .[] | \"[\`\(.[0])\`] \`\(.[1]/1000 | todateiso8601)\` \(.[2])\"] | join(\"\n\")" "$source")
+
+  quoted_changes=$(
+    jq --arg k "$build_no_arch" --arg repo "$UPSTREAM" -r '
+      .[$k] as $e
+      | ($e.changes // []) as $chs
+      | ($chs[0][0]) as $a
+      | ($chs[-1][0]) as $b
+      | "\($repo)/compare/\($a)..\($b)" as $url
+      | [ $url ] + ( $chs | map("[`\(.[0])`] `\((.[1]/1000 | todateiso8601))` \(.[2])") )
+      | join("\n")
+    ' "$source" | jq -Rs '.'
+  )
 
   echo "Build  : $build"
   echo "Changes: $quoted_changes"
@@ -55,11 +65,14 @@ END
 
   echo "Using release config: $release_config"
 
+  release_config_file="$(mktemp)"
+  printf '%s' "$release_config" >"$release_config_file"
+
   get_release_json=$(gh_api GET "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$build" || true)
   release_id=$(echo "${get_release_json:-}" | jq -r '.id // empty')
 
   if [ -z "$release_id" ]; then
-    release_json=$(gh_api POST "https://api.github.com/repos/$GITHUB_REPOSITORY/releases" "$release_config")
+    release_json=$(gh_api POST "https://api.github.com/repos/$GITHUB_REPOSITORY/releases" "@$release_config_file")
     release_id=$(echo "$release_json" | jq -r '.id // empty')
 
     if [ -z "$release_id" ]; then
@@ -75,6 +88,7 @@ END
       echo "Bad response:"
       echo "$release_json"
       echo "Cannot resolve release id, aborting..."
+      rm -f "$release_config_file"
       exit 2
     fi
 
@@ -82,6 +96,8 @@ END
   else
     echo "Release exists for tag '$build' (id=$release_id)"
   fi
+
+  rm -f "$release_config_file"
 
   echo "Preparing to upload asset $build_artefact -> $release_id"
 

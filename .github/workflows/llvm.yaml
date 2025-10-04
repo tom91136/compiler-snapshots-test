@@ -12,5 +12,6 @@ jobs:
     uses: ./.github/workflows/shared.yaml
     secrets: inherit
     with:
+      upstream: https://github.com/llvm/llvm-project
       build_script: action_build_llvm.sh
       config: llvm

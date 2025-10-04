@@ -12,5 +12,6 @@ jobs:
     uses: ./.github/workflows/shared.yaml
     secrets: inherit
     with:
+      upstream: https://github.com/gcc-mirror/gcc
       build_script: action_build_gcc.sh
       config: gcc
