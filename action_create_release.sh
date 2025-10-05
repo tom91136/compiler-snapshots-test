@@ -44,7 +44,13 @@ for build in "${builds_array[@]}"; do
       | "\($repo)/compare/\($a)..\($b)" as $url
       | [ $url ] + ( $chs | map("[`\(.[0])`] `\((.[1]/1000 | todateiso8601))` \(.[2])") )
       | join("\n")
-    ' "$source" | jq -Rs '.'
+  ' "$source" |
+      jq -Rs '
+      if length > 120000
+      then .[0:120000] + "..."
+      else .
+      end
+  '
   )
 
   echo "Build  : $build"
