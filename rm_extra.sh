@@ -47,7 +47,6 @@ for t in "${all_tags[@]:-}"; do
     tags_to_delete+=("$t")
     echo " - $t"
   fi
-  echo " - $t"
 done
 
 read -r -p "Found ${#tags_to_delete[@]} extra releases, delete? (parallel=${PARALLEL}) [y/N] " ans
