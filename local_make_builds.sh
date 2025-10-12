@@ -18,7 +18,14 @@ echo "Job count: ${#jobs[@]}"
 
 fmt_time() { date -ud "@$1" +'%Hh%Mm%Ss'; }
 
-docker create --name "$container_name" --replace -v "$PWD:/host" build_image:latest sleep infinity
+docker create --name "$container_name" --replace -v "$PWD:/host" \
+  --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
+  --tmpfs /var/tmp:rw,exec,nosuid,nodev,mode=1777 \
+  --tmpfs /ccache:rw,nosuid,nodev,mode=0777 \
+  -e CCACHE_DIR=/ccache \
+  build_image:latest \
+  sleep infinity
+
 docker start "$container_name" >/dev/null
 
 cleanup() {
