@@ -65,17 +65,21 @@ run-bisect() {
   cd "/$repo"
   reset
 
-  git bisect start --term-old=fixed --term-new=broken "$BAD" "$GOOD1"
-  run-bisect first-bad
-  echo "## first bad bisect result ##"
-  git bisect log
-  first_bad=$(git bisect view --format=%H)
-  echo "## first-bad=$first_bad"
-  reset
+  if [[ -n "${GOOD1:-}" ]]; then
+    git bisect start --term-old=fixed --term-new=broken "$BAD" "$GOOD1"
+    run-bisect first-bad
+    echo "## first bad bisect result ##"
+    git bisect log
+    first_bad=$(git bisect view --format=%H)
+    echo "## first-bad=$first_bad"
+    reset
 
-  if [[ -z "$first_bad" ]]; then
-    echo "Error: Could not determine first bad commit" >&2
-    exit 1
+    if [[ -z "$first_bad" ]]; then
+      echo "Error: Could not determine first bad commit" >&2
+      exit 1
+    fi
+  else
+    first_bad="$BAD"
   fi
 
   git bisect start --term-old=broken --term-new=fixed "$GOOD2" "$first_bad"
