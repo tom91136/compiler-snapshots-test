@@ -42,6 +42,9 @@ missing.json
 
 docs/
 build/
+log/
+build_*/
+log_*/
 
 *.tar.xz
 *.squashfs

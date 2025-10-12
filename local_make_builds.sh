@@ -4,7 +4,7 @@ set -euo pipefail
 matrix_json="$1"
 host_arch="$(uname -m)"
 
-name="${matrix_json##*/}" && name="${name%%.*}"
+name="${matrix_json%.*}" && name="${name//\//_}"
 container_name="build_persistent_$name"
 
 mapfile -t matrix < <(jq -er '.[]' "$matrix_json")
@@ -32,18 +32,20 @@ on_interrupt() {
 trap cleanup EXIT
 trap on_interrupt INT TERM
 
-mkdir -p logs
 for job in "${jobs[@]}"; do
   [[ -z "$job" ]] && continue
+  job_compiler="${job%%-*}"
   job_arch="${job##*.}"
   if [[ "$job_arch" != "$host_arch" ]]; then
     echo "Skipping $job (arch mismatch: host=$host_arch, job=$job_arch)" && continue
   fi
 
+  mkdir -p "logs_$job_compiler"
+
   SECONDS=0
   if [[ -f "$job.squashfs" ]]; then
     echo "✅ \`$job (skip,    $(fmt_time "$SECONDS"))\`"
-  elif docker exec -w "/host" "$container_name" timeout 3h "/host/action_build_${job%%-*}.sh" "$job" &>"logs/$job.log"; then
+  elif docker exec -w "/host" "$container_name" timeout 4h "/host/action_build_$job_compiler.sh" "$job" &>"logs_$job_compiler/$job.log"; then
     echo "✅ \`$job (build,   $(fmt_time "$SECONDS"))\`"
   else
     echo "❌ \`$job (build,   $(fmt_time "$SECONDS"))\`"

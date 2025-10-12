@@ -8,7 +8,7 @@ host_arch="$(uname -m)"
 matrix="matrix-$compiler-$host_arch.json"
 [[ -s "$matrix" ]] || { echo "Matrix $matrix not found or empty" && exit 1; }
 
-mkdir -p build
+mkdir -p "build_$compiler"
 
 readarray -t groups < <(
   jq -c --argjson N "$N" '
@@ -24,7 +24,7 @@ readarray -t groups < <(
 
 chunks=()
 for i in "${!groups[@]}"; do
-  f="build/chunk_$(printf '%02d' "$i").json"
+  f="build_$compiler/chunk_$(printf '%02d' "$i").json"
   printf '%s\n' "${groups[$i]}" >"$f"
   if [ "$(jq 'length' "$f")" -gt 0 ]; then
     chunks+=("$f")
@@ -44,7 +44,7 @@ export -f build_one
 
 SHELL="$(command -v bash)" parallel \
   --no-notice --line-buffer \
-  --joblog "build/parallel.log" \
+  --joblog "build_$compiler/parallel.log" \
   -j "$N" --noswap --memfree 20% \
   build_one ::: "${chunks[@]}"
 
