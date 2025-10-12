@@ -41,6 +41,7 @@ missing.json
 *-bare/
 
 docs/
+build/
 
 *.tar.xz
 *.squashfs

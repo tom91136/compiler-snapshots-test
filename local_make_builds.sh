@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-compiler="$1"
+matrix_json="$1"
 host_arch="$(uname -m)"
-container_name="build_persistent"
 
-mapfile -t matrix < <(jq -er '.[]' "matrix-$compiler-$host_arch.json")
+name="${matrix_json##*/}" && name="${name%%.*}"
+container_name="build_persistent_$name"
+
+mapfile -t matrix < <(jq -er '.[]' "$matrix_json")
 jobs=()
 for g in "${matrix[@]}"; do
   IFS=';' read -ra parts <<<"$g"
@@ -41,7 +43,7 @@ for job in "${jobs[@]}"; do
   SECONDS=0
   if [[ -f "$job.squashfs" ]]; then
     echo "✅ \`$job (skip,    $(fmt_time "$SECONDS"))\`"
-  elif docker exec -w "/host" "$container_name" timeout 3h "/host/action_build_$compiler.sh" "$job" &>"logs/$job.log"; then
+  elif docker exec -w "/host" "$container_name" timeout 3h "/host/action_build_${job%%-*}.sh" "$job" &>"logs/$job.log"; then
     echo "✅ \`$job (build,   $(fmt_time "$SECONDS"))\`"
   else
     echo "❌ \`$job (build,   $(fmt_time "$SECONDS"))\`"
