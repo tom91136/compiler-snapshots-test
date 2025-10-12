@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 REPO="${REPO:?Set REPO to 'gcc' or 'llvm'}"
-GOOD1="${GOOD1:?Set GOOD1 to a known good commit hash before BAD}"
+#GOOD1="${GOOD1:?Set GOOD1 to a known good commit hash before BAD}"
 BAD="${BAD:?Set BAD to a known bad commit hash}"
 GOOD2="${GOOD2:?Set GOOD2 to a known good commit hash after BAD}"
 
