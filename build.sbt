@@ -55,9 +55,10 @@ lazy val generator = project
     name           := "generator",
     outputStrategy := Some(StdoutOutput),
     libraryDependencies ++= Seq(
-      "org.eclipse.jgit" % "org.eclipse.jgit" % "7.3.0.202506031305-r",
-      "com.outr"        %% "scribe-slf4j"     % "3.17.0",
-      "com.lihaoyi"     %% "upickle"          % upickleVersion
+      "org.eclipse.jgit"        % "org.eclipse.jgit"           % "7.4.0.202509020913-r",
+      "org.scala-lang.modules" %% "scala-parallel-collections" % "1.2.0",
+      "com.outr"               %% "scribe-slf4j"               % "3.17.0",
+      "com.lihaoyi"            %% "upickle"                    % upickleVersion
     ),
     Compile / packageBin / mainClass := Some("uob_hpc.Main"),
     assemblyMergeStrategy            := {

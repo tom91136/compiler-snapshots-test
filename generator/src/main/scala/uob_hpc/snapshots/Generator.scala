@@ -1,30 +1,21 @@
 package uob_hpc.snapshots
 
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
-import java.nio.file.StandardOpenOption
-import java.time.Instant
-import java.time.ZoneOffset
-import java.time.ZonedDateTime
-import java.time.temporal.IsoFields
-import scala.collection.immutable.ArraySeq
-import scala.jdk.CollectionConverters.*
-import scala.util.Try
-import scala.util.Using
-
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.errors.TransportException
-import org.eclipse.jgit.lib.Constants
-import org.eclipse.jgit.lib.ObjectId
-import org.eclipse.jgit.lib.Ref
-import org.eclipse.jgit.lib.Repository
-import org.eclipse.jgit.revwalk.RevCommit
-import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.lib.{Constants, ObjectId, Ref, Repository}
+import org.eclipse.jgit.revwalk.{RevCommit, RevWalk}
 import org.eclipse.jgit.revwalk.filter.RevFilter
 import org.eclipse.jgit.transport.TagOpt
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.treewalk.filter.PathFilter
+
+import java.nio.file.{Files, Path, Paths, StandardOpenOption}
+import java.time.{Instant, ZoneOffset, ZonedDateTime}
+import java.time.temporal.IsoFields
+import scala.collection.immutable.ArraySeq
+import scala.collection.parallel.CollectionConverters.*
+import scala.jdk.CollectionConverters.*
+import scala.util.{Try, Using}
 
 def writeText(xs: String, path: Path): Unit = Files.writeString(
   path,
@@ -158,20 +149,26 @@ def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
     case _      => scribe.error(s"Unsupported config: $configName"); sys.exit(1)
   }
 
+  def exec(xs: String*) = {
+    scribe.info(s"> ${xs.mkString(" ")}")
+    sys.process.Process(xs).! : Unit
+  }
+
   val repoDir = Paths.get(s"./${config.name}-bare").normalize().toAbsolutePath
+  // jgit can't fetch bare
   if (!Files.exists(repoDir)) {
-    sys.process.Process(
-      Seq(
-        "git",
-        "clone",
-        "--progress",
-        "--bare",
-        "--no-checkout",
-        s"--filter=${if (config.requirePath.isDefined) "blob:none" else "tree:0"}",
-        config.mirror,
-        repoDir.toString
-      )
-    ).! : Unit
+    exec(
+      "git",
+      "clone",
+      "--progress",
+      "--bare",
+      "--no-checkout",
+      s"--filter=${if (config.requirePath.isDefined) "blob:none" else "tree:0"}",
+      config.mirror,
+      repoDir.toString
+    )
+  } else {
+    exec("git", "-C", repoDir.toString, "fetch", "origin")
   }
 
   val git = Git.open(repoDir.toFile)
@@ -201,8 +198,7 @@ def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
   scribe.info(s"Max Jobs =        $GHAMaxJobCount")
 
   val sharedIgnores = resolveIgnores(git, Paths.get(s"./ignore_commits.${config.name}"))
-
-  val archBuilds = config.arches.map { arch =>
+  val archBuilds = config.arches.par.map { arch =>
     val repo               = git.getRepository
     val ignoreCommits      = sharedIgnores ++ resolveIgnores(git, Paths.get(s"./ignore_commits.${config.name}.$arch"))
     val ignoredCommitNames = ignoreCommits.flatMap(_._2.map(_.getName))
@@ -241,7 +237,7 @@ def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
         }
         val startRef = basepointSpec.getOrElse(mergeBase(repo, head, endRef))
 
-        scribe.info(s"Ver=$ver Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
+        scribe.info(s"[$arch] Ver=$ver Basepoint=$basepointSpec $startRef=> Branch=$endSpec ($endRef)")
 
         val commits =
           git
@@ -321,7 +317,7 @@ def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
         .filterNot(releasedBuildsWithArch.contains(_))
 
     arch -> (builds, missing)
-  }
+  }.seq
 
   val allMissing   = archBuilds.flatMap(_._2._2)
   val buildsPerJob = (allMissing.length.toDouble / GHAMaxJobCount).ceil.toInt
