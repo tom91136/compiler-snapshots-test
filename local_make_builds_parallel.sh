@@ -8,32 +8,46 @@ host_arch="$(uname -m)"
 matrix="matrix-$compiler-$host_arch.json"
 [[ -s "$matrix" ]] || { echo "Matrix $matrix not found or empty" && exit 1; }
 
-mkdir -p "build_$compiler"
+rm -rf "build_$compiler" && mkdir -p "build_$compiler"
 
-readarray -t groups < <(
-  jq -c --argjson N "$N" '
-    (map(split(";")) | flatten) as $a
-    | ($a|length) as $len
-    | ( (($len + $N - 1) / $N) | floor ) as $sz
-    | if $len == 0 then [] else
-        [ range(0; $len; $sz) | $a[ . : (. + $sz) ] ]
-      end
-    | .[]
-  ' "$matrix"
-)
+mapfile -t ALL_JOBS < <(jq -r 'map(split(";")) | flatten | .[]' "$matrix")
+
+pending=()
+for job in "${ALL_JOBS[@]}"; do
+  [[ -z "$job" ]] && continue
+  [[ -f "$job.squashfs" ]] && echo "✅ \`$job (completed)\`" && continue
+  # log file exists but no archive, so fail
+  [[ -f "logs_${compiler}/${job}.log" ]] && echo "❌ \`$job (failed)\`" && continue
+  pending+=("$job")
+done
+
+((${#pending[@]})) || { echo "No jobs" && exit 0; }
 
 chunks=()
-for i in "${!groups[@]}"; do
+len=${#pending[@]}
+sz=$(((len + N - 1) / N))
+for ((i = 0, start = 0; start < len; i++, start += sz)); do
   f="build_$compiler/chunk_$(printf '%02d' "$i").json"
-  printf '%s\n' "${groups[$i]}" >"$f"
-  if [ "$(jq 'length' "$f")" -gt 0 ]; then
+  seg=("${pending[@]:start:sz}")
+  if ((${#seg[@]})); then
+    printf '%s\0' "${seg[@]}" | jq -Rs 'split("\u0000")[:-1]' >"$f"
     chunks+=("$f")
   fi
 done
 
-if ((${#chunks[@]} == 0)); then
-  echo "No jobs" && exit 0
-fi
+((${#chunks[@]})) || { echo "No jobs" && exit 0; }
+
+echo "Total jobs: $(jq -s 'map(length) | add // 0' "${chunks[@]}")"
+echo "Total groups: ${#chunks[@]}"
+for f in "${chunks[@]}"; do
+  echo "  $(basename "$f"): $(jq 'length' "$f") jobs"
+done
+
+read -r -p "Continue? [y/N] " ans
+case "$ans" in
+y | Y) ;;
+*) echo "Aborted." && exit 0 ;;
+esac
 
 build_one() {
   set -euo pipefail
