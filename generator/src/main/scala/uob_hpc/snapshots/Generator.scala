@@ -45,7 +45,7 @@ case class Config(
 val GCC = Config(
   name = "gcc",
   mirror = "https://github.com/gcc-mirror/gcc.git",
-  arches = Vector("x86_64", "aarch64"),
+  arches = Vector("x86_64", "aarch64", "ppc64le"),
   basepointTags = {
     case (s"refs/tags/basepoints/gcc-$ver", ref)                                       => ver          -> ref
     case (s"refs/tags/releases/gcc-$maj.$min.0", ref) if maj.toIntOption.exists(_ < 5) => s"$maj.$min" -> ref
@@ -54,6 +54,7 @@ val GCC = Config(
   filter = { // see https://gcc.gnu.org/releases.html
     case (ver, "x86_64")  => ver.toFloatOption.exists(_ >= 4.0)
     case (ver, "aarch64") => ver.toFloatOption.exists(_ >= 4.8) // aarch64 only really worked after 4.8
+    case (ver, "ppc64le") => ver.toFloatOption.exists(_ >= 5.0) // ppc64le needed IBM patches in 4.8~4.9
     case (_, arch)        => throw IllegalArgumentException(s"Unsupported arch: $arch")
   }
 )
@@ -67,7 +68,7 @@ val GCC = Config(
 val LLVM = Config(
   name = "llvm",
   mirror = "https://github.com/llvm/llvm-project.git",
-  arches = Vector("x86_64", "aarch64"),
+  arches = Vector("x86_64", "aarch64", "ppc64le"),
   basepointTags = {
     case (s"refs/tags/llvmorg-$maj.$min.$_", ref) if min.forall(_.isDigit) && maj.toIntOption.exists(_ <= 3) =>
       s"$maj.$min" -> ref // <= 3.x series, no basepoints and keep minor
@@ -80,6 +81,7 @@ val LLVM = Config(
   filter = { // see https://releases.llvm.org/
     case (ver, "x86_64")  => ver.toFloatOption.exists(_ >= 3.0f)
     case (ver, "aarch64") => ver.toFloatOption.exists(_ >= 3.6f)
+    case (ver, "ppc64le") => ver.toFloatOption.exists(_ >= 3.6f)
     case (_, arch)        => throw IllegalArgumentException(s"Unsupported arch: $arch")
   },
   requirePath = Some("llvm/CMakeLists.txt")

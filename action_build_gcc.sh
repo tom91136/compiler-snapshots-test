@@ -124,6 +124,10 @@ for build in "${builds_array[@]}"; do
   # https://github.com/gcc-mirror/gcc/commit/6e3f8a30262f988bd062a6662c0b0c61bd9e884a
   SPAIR_FIX="6e3f8a30262f988bd062a6662c0b0c61bd9e884a"
 
+  # Lexer has a alignment bug doing unsafe casts, only triggers on ppc64le
+  # First fixed in GCC 8.x, see https://lists.busybox.net/pipermail/buildroot/2018-July/214807.html
+  PPCLEX_FIX="a3a821c903c9fa2288712d31da2038d0297babcb"
+
   echo "Build   : $build"
   echo "Commit  : $hash"
 
@@ -283,6 +287,17 @@ for build in "${builds_array[@]}"; do
           s=L[t]
           for(i=1;i<=n;i++){ if(i==t) continue; print L[i]; if(i==a-1) print s }
         }' "$f" >tmp && mv tmp "$f"
+    fi
+
+    if git_is_ancestor "$PPCLEX_FIX" "$hash"; then
+      echo "Commit does not require patching lex.c, continuing..."
+    else
+      f="libcpp/lex.c"
+      echo "Patching $f"
+      awk '{
+              gsub(/data = \*\(\(const vc \*\)s\);/, "data = __builtin_vec_vsx_ld (0, s);");
+              print
+           }' "$f" >tmp && mv tmp "$f"
     fi
 
     if git_is_ancestor "$UCTX_FIX" "$hash"; then

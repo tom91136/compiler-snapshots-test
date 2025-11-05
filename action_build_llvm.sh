@@ -155,6 +155,14 @@ for build in "${builds_array[@]}"; do
   # and we end up with a non-functional flang binary, see https://github.com/llvm/llvm-project/commit/69d0bd56ad064df569cd065902fb7036f0311c0a
   readonly MLIR_FIX="69d0bd56ad064df569cd065902fb7036f0311c0a"
 
+  # The lexer has a inconsistent AltiVec vector usage, which was fixed to __vector
+  # in https://github.com/llvm/llvm-project/commit/3185c30c54d0af5bffbff3bcfd721668d086ff10
+  readonly PPCVEC_FIX="3185c30c54d0af5bffbff3bcfd721668d086ff10"
+
+  # Flang has a unfinished section on sums and reductions where a long double and ieee 128 was mixed in a template
+  # this work was subsequently completed in https://github.com/llvm/llvm-project/commit/104f3c180644c8872eaad0b3fcf6a6b948d92a71
+  readonly PPCSUM_FIX="104f3c180644c8872eaad0b3fcf6a6b948d92a71"
+
   echo "Build   : $build"
   echo "Commit  : $hash"
 
@@ -166,7 +174,7 @@ for build in "${builds_array[@]}"; do
       --progress \
       --no-recurse-submodules \
       --filter=blob:none \
-      origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX" "$MLIR_FIX"
+      origin "$hash" "$TGT_FIX" "$ORC_FIX" "$CGF_FIX" "$HMD_FIX" "$ARM_FIX" "$FLANG_FIX" "$MLIR_FIX" "$PPCVEC_FIX" "$PPCSUM_FIX"
     git checkout -f -q "$hash"
   else
     git reset HEAD --hard
@@ -334,6 +342,30 @@ for build in "${builds_array[@]}"; do
     }
     in_install && $0 ~ /^endfunction/ { in_install=0 }
     { print } ' "$f" >"$f.new" && mv "$f.new" "$f"
+  fi
+
+  if git_is_ancestor "$PPCVEC_FIX" "$hash"; then
+    echo "Commit does not require patching Lexer.cpp, continuing..."
+  else
+    f="clang/lib/Lex/Lexer.cpp"
+    echo "Patching $f"
+    awk '
+      {
+        gsub(/const vector unsigned char\*/, "const __vector unsigned char*");
+        print
+      }' "$f" >tmp && mv tmp "$f"
+  fi
+
+  if git_is_ancestor "$PPCSUM_FIX" "$hash"; then
+    echo "Commit does not require patching sum.cpp, continuing..."
+  else
+    f="flang/runtime/sum.cpp"
+    echo "Patching $f"
+    awk '
+      {
+        gsub(/long double/, "CppTypeFor<TypeCategory::Real, 16>");
+            print
+      }' "$f" >tmp && mv tmp "$f"
   fi
 
   if git_is_ancestor "$ARM_FIX" "$hash"; then
@@ -573,8 +605,12 @@ EOF
       export CCC_OVERRIDE_OPTIONS="^--gcc-toolchain=$toolchain_root"
     fi
 
-    flang_nproc="$(awk '/MemTotal:/ {m=int($2/1024/5000); if(m<2)m=2; print m}' /proc/meminfo)"
-    echo "Using $flang_nproc threads for FLANG_PARALLEL_COMPILE_JOBS"
+    if [[ -n "${FLANG_MAX_MEMORY_MB:-}" ]]; then
+      flang_nproc="$(awk -v mem_mb="$FLANG_MAX_MEMORY_MB" 'BEGIN {m=int(mem_mb/5000); if(m<2)m=2; print m}')"
+    else
+      flang_nproc="$(awk '/MemTotal:/ {m=int(($2/1024)/5000); if(m<2)m=2; print m}' /proc/meminfo)"
+    fi
+	echo "Using $flang_nproc threads for FLANG_PARALLEL_COMPILE_JOBS"
 
     working_projects="clang;openmp"
     if [[ "$broken_pstl" == false ]]; then working_projects="$working_projects;pstl"; fi
@@ -584,7 +620,12 @@ EOF
     project_to_build="$(filter_cmake_list "$working_projects" "%%/CMakeLists.txt")"
     echo "Using project list: $project_to_build"
 
-    arch_to_build="$(filter_cmake_list "X86;AArch64;NVPTX;AMDGPU" "llvm/lib/Target/%%/CMakeLists.txt")"
+
+	case "$(uname -m)" in
+	ppc64le) arch_list="PowerPC;NVPTX" ;;
+	*) arch_list="X86;AArch64;NVPTX;AMDGPU" ;;
+	esac
+    arch_to_build="$(filter_cmake_list "$arch_list" "llvm/lib/Target/%%/CMakeLists.txt")"
     echo "Using arch list: $arch_to_build"
 
     # LLVM <= 3.x uses the old-style subprojects, move them into the expected places

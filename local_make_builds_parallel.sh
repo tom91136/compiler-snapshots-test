@@ -43,6 +43,11 @@ for f in "${chunks[@]}"; do
   echo "  $(basename "$f"): $(jq 'length' "$f") jobs"
 done
 
+FLANG_MAX_MEMORY_MB="$(awk -v N="$N" '/MemTotal:/ {print int(($2/1024)/N)}' /proc/meminfo)"
+export FLANG_MAX_MEMORY_MB
+
+echo "Using FLANG_MAX_MEMORY_MB=$FLANG_MAX_MEMORY_MB"
+
 read -r -p "Continue? [y/N] " ans
 case "$ans" in
 y | Y) ;;
@@ -55,6 +60,7 @@ build_one() {
   ./local_make_builds.sh "$json" 2>&1 | tee "${json%.json}.log"
 }
 export -f build_one
+
 
 SHELL="$(command -v bash)" parallel \
   --no-notice --line-buffer \
