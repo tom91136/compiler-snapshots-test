@@ -50,3 +50,5 @@ log_*/
 *.squashfs
 *.sif
 *.log
+
+cmake-*/

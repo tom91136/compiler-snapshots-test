@@ -3,10 +3,15 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-REPO="${REPO:?Set REPO to 'gcc' or 'llvm'}"
-#GOOD1="${GOOD1:?Set GOOD1 to a known good commit hash before BAD}"
-BAD="${BAD:?Set BAD to a known bad commit hash}"
-GOOD2="${GOOD2:?Set GOOD2 to a known good commit hash after BAD}"
+: "${REPO:?Set REPO to 'gcc' or 'llvm'}"
+: "${BAD:?Set BAD to a known bad commit hash}"
+
+GOOD1="${GOOD1-}"
+GOOD2="${GOOD2-}"
+
+if [[ -z "$GOOD1" && -z "$GOOD2" ]]; then
+  echo "At least one of GOOD1 (a known good before BAD) or GOOD2 (a known good after BAD) required." >&2 && exit 2
+fi
 
 case "$REPO" in
 gcc)
@@ -29,8 +34,7 @@ reset() {
     git reset --hard HEAD
     git clean -ffdx
     git bisect reset
-  } &>/dev/null
-
+  } &>/dev/null || true
 }
 
 run-bisect() {
@@ -44,13 +48,13 @@ run-bisect() {
        echo ">>> checking ${PHASE}: $commit ($ts)"
        SECONDS=0
        set +e
-       "$SCRIPT_DIR/action_build_${REPO}.sh" "$@" &> "$logfile"
+       CROSS_ARCH=riscv64 "$SCRIPT_DIR/action_build_${REPO}_cross.sh" "$@" &> "$logfile"
        rc=$?
        set -e
        dur=$SECONDS
        printf "<<< duration=%ss, rc=%s\n" "$dur" "$rc"
        [ "$PHASE" = first-fixed ] && rc=$(( rc == 0 ? 1 : 0 ))
-       git reset HEAD --hard
+       git reset --hard HEAD
        git clean -ffdx
        exit "$rc"
     ' _
@@ -65,12 +69,13 @@ run-bisect() {
   cd "/$repo"
   reset
 
-  if [[ -n "${GOOD1:-}" ]]; then
+  if [[ -n "$GOOD1" ]]; then
     git bisect start --term-old=fixed --term-new=broken "$BAD" "$GOOD1"
     run-bisect first-bad
     echo "## first bad bisect result ##"
-    git bisect log
-    first_bad=$(git bisect view --format=%H)
+    git bisect log || true
+    # Use HEAD as the result of the concluded bisect
+    first_bad="$(git rev-parse --verify HEAD || true)"
     echo "## first-bad=$first_bad"
     reset
 
@@ -82,12 +87,24 @@ run-bisect() {
     first_bad="$BAD"
   fi
 
+  if [[ -z "$GOOD2" ]]; then
+    echo "## broken-start (first-bad) = $first_bad"
+    echo "Done"
+    exit 0
+  fi
+
+  # ---- Phase 2: find first fixed (only if GOOD2 is set) ----
   git bisect start --term-old=broken --term-new=fixed "$GOOD2" "$first_bad"
   run-bisect first-fixed
   echo "## first fixed bisect result ##"
-  git bisect log
-  first_fixed=$(git bisect view --format=%H)
+  git bisect log || true
+  first_fixed="$(git rev-parse --verify HEAD || true)"
   echo "## first-fixed=$first_fixed"
+
+  if [[ -z "$first_fixed" ]]; then
+    echo "Error: Could not determine first fixed commit" >&2
+    exit 1
+  fi
 
   if ! git merge-base --is-ancestor "$first_bad" "$first_fixed" 2>/dev/null; then
     echo "Error: first_fixed ($first_fixed) is not reachable from first_bad ($first_bad)" >&2

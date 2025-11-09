@@ -2,18 +2,14 @@
 
 set -euo pipefail
 
-set +u # scl_source has unbound vars, disable check
-source scl_source enable gcc-toolset-14 || true
-set -u
-
 export PATH="/usr/lib64/ccache${PATH:+:${PATH}}"
 
 ccache --set-config=sloppiness=locale,time_macros
 ccache -M 10G
 ccache -s
 
+readonly CROSS_ARCH="${CROSS_ARCH:?cross architecture}"
 readonly BUILDS=${1:-}
-
 readonly dry=false
 
 # shellcheck disable=SC2206
@@ -36,13 +32,13 @@ build_cmake() {
     tar xf "$src_tar" -C "$workdir"
     (
       cd "$src_dir"
-      cmake3 -S . -B build -DCMAKE_INSTALL_PREFIX="$prefix" -GNinja
-      cmake3 --build build --target install
+      cmake -S . -B build -DCMAKE_INSTALL_PREFIX="$prefix" -GNinja
+      cmake --build build --target install
       rm -rf "$src_dir" "$src_tar"
     )
   fi
 
-  eval "cmake3() { \"$prefix/bin/cmake\" \"\$@\"; }"
+  eval "cmake() { \"$prefix/bin/cmake\" \"\$@\"; }"
 }
 
 build_ninja() {
@@ -119,7 +115,7 @@ for build in "${builds_array[@]}"; do
 
   if [[ "$build" == llvm-* ]]; then
     build_no_arch="${build%.*}"
-    builds_json="/host/builds-llvm-$(uname -m).json"
+    builds_json="/host/builds-llvm-$CROSS_ARCH.json"
     hash=$(jq -r ".\"$build_no_arch\" | .hash" "$builds_json")
   else
     hash="$build"
@@ -205,7 +201,7 @@ for build in "${builds_array[@]}"; do
 
   if git_is_ancestor "$TGT_FIX" "$hash"; then
     echo "Commit does not require CMake < 3.17, continuing..."
-    cmake3() { /usr/bin/cmake "$@"; }
+    cmake() { /usr/bin/cmake "$@"; }
   else
     echo "Commit requires CMake < 3.17, building from scratch..."
     build_cmake "v3.16" "3.16.4"
@@ -612,7 +608,7 @@ EOF
     fi
     echo "Using $flang_nproc threads for FLANG_PARALLEL_COMPILE_JOBS"
 
-    working_projects="clang;openmp"
+    working_projects="clang"
     if [[ "$broken_pstl" == false ]]; then working_projects="$working_projects;pstl"; fi
     if [[ "$broken_lld" == false ]]; then working_projects="$working_projects;lld"; fi
     if [[ "$enable_flang" == true ]]; then working_projects="$working_projects;flang"; fi
@@ -620,12 +616,16 @@ EOF
     project_to_build="$(filter_cmake_list "$working_projects" "%%/CMakeLists.txt")"
     echo "Using project list: $project_to_build"
 
-    case "$(uname -m)" in
-    ppc64le) arch_list="PowerPC;NVPTX" ;;
-    *) arch_list="X86;AArch64;NVPTX;AMDGPU" ;;
+    case "$CROSS_ARCH" in
+    riscv64) arch_list="RISCV" ;;
+    *) echo "Unsupported cross arch: $CROSS_ARCH" && exit 1 ;;
     esac
+
     arch_to_build="$(filter_cmake_list "$arch_list" "llvm/lib/Target/%%/CMakeLists.txt")"
     echo "Using arch list: $arch_to_build"
+
+    native_project="clang"
+    if [[ "$enable_flang" == true ]]; then native_project="$native_project;mlir"; fi
 
     # LLVM <= 3.x uses the old-style subprojects, move them into the expected places
     if ! grep -q "LLVM_ENABLE_PROJECTS" llvm/CMakeLists.txt; then
@@ -652,40 +652,73 @@ EOF
       extra+=("-DLLVM_INSTALL_TOOLCHAIN_ONLY=ON")
     fi
 
-    cmake3 --version
+    cmake --version
     {
 
       time LDFLAGS="-pthread" \
         CFLAGS="${cflags[*]} ${flags[*]}" \
         CXXFLAGS="${cxxflags[*]} ${flags[*]} ${includes[*]} ${nowarn[*]}" \
-        cmake3 -S llvm -B build \
+        cmake -S llvm -B build-native \
         -DCMAKE_C_COMPILER_LAUNCHER=ccache \
         -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-        -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_ENABLE_ASSERTIONS=ON \
-        -DLLVM_LINK_LLVM_DYLIB=ON \
-        -DLLVM_BUILD_LLVM_DYLIB=ON \
-        -DLLVM_ENABLE_PROJECTS="$project_to_build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLVM_ENABLE_PROJECTS="$native_project" \
         -DLLVM_TARGETS_TO_BUILD="$arch_to_build" \
-        -DLLVM_INCLUDE_BENCHMARKS=OFF \
-        -DLLVM_INCLUDE_TESTS=OFF \
-        -DLLVM_INCLUDE_DOCS=OFF \
-        -DLLVM_INCLUDE_EXAMPLES=OFF \
-        -DLLVM_BUILD_TESTS=OFF \
-        -DLLVM_BUILD_DOCS=OFF \
-        -DLLVM_BUILD_EXAMPLES=OFF \
-        -DLLVM_STATIC_LINK_CXX_STDLIB=ON \
-        -DLIBOMP_USE_QUAD_PRECISION=OFF \
-        -DFLANG_INCLUDE_TESTS=OFF \
-        -DFLANG_INCLUDE_DOCS=OFF \
-        -DFLANG_RT_INCLUDE_TESTS=OFF \
-        -DFLANG_PARALLEL_COMPILE_JOBS="$flang_nproc" \
-        -DCMAKE_INSTALL_PREFIX="$install_dir" \
-        "${extra[@]}" \
         -GNinja
 
-      time cmake3 --build build -- -j"${MAX_PROC:-$(nproc)}" # Ninja is parallel by default
-      time cmake3 --build build --target install
+      time cmake --build build-native --target llvm-tblgen
+      time cmake --build build-native --target clang-tblgen
+      if [[ "$enable_flang" == true ]]; then
+        time cmake --build build-native --target mlir-tblgen
+        time cmake --build build-native --target mlir-linalg-ods-yaml-gen || true
+      fi
+
+      (
+        export CC="ccache $CROSS_ARCH-linux-gnu-gcc"
+        export CXX="ccache $CROSS_ARCH-linux-gnu-g++"
+        export AR="ccache $CROSS_ARCH-linux-gnu-ar"
+        export RANLIB="ccache $CROSS_ARCH-linux-gnu-ranlib"
+        export LD="ccache $CROSS_ARCH-linux-gnu-ld"
+        export STRIP="ccache $CROSS_ARCH-linux-gnu-strip"
+
+        time LDFLAGS="-pthread" \
+          CFLAGS="-march=rv64gc ${cflags[*]} ${flags[*]}" \
+          CXXFLAGS="-march=rv64gc ${cxxflags[*]} ${flags[*]} ${includes[*]} ${nowarn[*]}" \
+          cmake -S llvm -B build \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DLLVM_ENABLE_ASSERTIONS=ON \
+          -DLLVM_LINK_LLVM_DYLIB=ON \
+          -DLLVM_BUILD_LLVM_DYLIB=ON \
+          -DLLVM_ENABLE_PROJECTS="$project_to_build" \
+          -DLLVM_TARGETS_TO_BUILD="$arch_to_build" \
+          -DCLANG_DEFAULT_TARGET_TRIPLE="$CROSS_ARCH-linux-gnu" \
+          -DLLVM_DEFAULT_TARGET_TRIPLE="$CROSS_ARCH-linux-gnu" \
+          -DLLVM_NATIVE_TOOL_DIR="$PWD/build-native/bin" \
+          -DLLVM_INCLUDE_BENCHMARKS=OFF \
+          -DLLVM_INCLUDE_TESTS=OFF \
+          -DLLVM_INCLUDE_DOCS=OFF \
+          -DLLVM_INCLUDE_EXAMPLES=OFF \
+          -DLLVM_BUILD_TESTS=OFF \
+          -DLLVM_BUILD_DOCS=OFF \
+          -DLLVM_BUILD_EXAMPLES=OFF \
+          -DLLVM_STATIC_LINK_CXX_STDLIB=ON \
+          -DLIBOMP_USE_QUAD_PRECISION=OFF \
+          -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
+          -DLIBOMP_OMPD_GDB_SUPPORT=OFF \
+          -DFLANG_INCLUDE_TESTS=OFF \
+          -DFLANG_INCLUDE_DOCS=OFF \
+          -DFLANG_RT_INCLUDE_TESTS=OFF \
+          -DFLANG_PARALLEL_COMPILE_JOBS="$flang_nproc" \
+          -DCMAKE_INSTALL_PREFIX="$install_dir" \
+          "${extra[@]}" \
+          -GNinja
+
+        time cmake --build build -- -j"${MAX_PROC:-$(nproc)}" # Ninja is parallel by default
+        time cmake --build build --target install
+      )
 
     } 2>&1 | tee "$install_dir/build.log"
 
@@ -695,6 +728,7 @@ EOF
   case "$(uname -m)" in
   x86_64 | amd64) filter=("-Xbcj" "x86") ;;
   aarch64 | arm64) filter=("-Xbcj" "arm") ;;
+  riscv64) filter=("-Xbcj" "riscv") ;;
   *) ;;
   esac
 

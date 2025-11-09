@@ -1,0 +1,75 @@
+ARG RELEASE=jammy
+ARG CROSS_ARCH="riscv64"
+ARG GCC_VER=12
+
+#ARG RELEASE=noble
+#ARG CROSS_ARCH="riscv64"
+#ARG GCC_VER=11
+
+FROM ubuntu:${RELEASE}
+ARG CROSS_ARCH
+ARG GCC_VER
+
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends software-properties-common ca-certificates gnupg lsb-release
+
+RUN cat >/etc/apt/sources.list <<EOF
+deb [arch=$(dpkg --print-architecture)] http://archive.ubuntu.com/ubuntu  $(lsb_release -sc) main restricted universe multiverse
+deb [arch=$(dpkg --print-architecture)] http://archive.ubuntu.com/ubuntu  $(lsb_release -sc)-updates main restricted universe multiverse
+deb [arch=$(dpkg --print-architecture)] http://archive.ubuntu.com/ubuntu  $(lsb_release -sc)-backports main restricted universe multiverse
+deb [arch=$(dpkg --print-architecture)] http://security.ubuntu.com/ubuntu $(lsb_release -sc)-security main restricted universe multiverse
+EOF
+
+RUN cat >/etc/apt/sources.list.d/$CROSS_ARCH.list <<EOF
+deb [arch=$CROSS_ARCH] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -sc) main universe multiverse
+deb [arch=$CROSS_ARCH] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -sc)-updates main universe multiverse
+deb [arch=$CROSS_ARCH] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -sc)-security main universe multiverse
+deb [arch=$CROSS_ARCH] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -sc)-backports main universe multiverse
+EOF
+
+RUN dpkg --add-architecture $CROSS_ARCH
+
+# XXX switch to the following for noble+
+# Explicitly set host arch for each DCF stanza for the primary source to prevent non-existent mirrors
+#RUN sed -i "/^[[:space:]]*Components:/a Architectures: $(dpkg --print-architecture)" /etc/apt/sources.list.d/ubuntu.sources
+#RUN dpkg --add-architecture $CROSS_ARCH
+#RUN cat >/etc/apt/sources.list.d/${CROSS_ARCH}.sources <<EOF
+#Types: deb
+#URIs: http://ports.ubuntu.com/ubuntu-ports
+#Suites: $(lsb_release -sc) $(lsb_release -sc)-updates $(lsb_release -sc)-security $(lsb_release -sc)-backports
+#Components: main universe multiverse
+#Architectures: ${CROSS_ARCH}
+#Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+#EOF
+
+RUN apt-get update || true
+
+
+RUN apt-get install -y --no-install-recommends \
+    build-essential file bzip2 texinfo flex git jq ninja-build python3-dev cmake wget bison automake libssl-dev ccache squashfs-tools
+
+RUN apt-get install -y --no-install-recommends libc6:$CROSS_ARCH libstdc++6:$CROSS_ARCH libgcc-s1:$CROSS_ARCH libatomic1:$CROSS_ARCH
+
+RUN set -eux; \
+  case "$CROSS_ARCH" in \
+    aarch64|arm64)   ADD_ARCH=arm64;   TRIPLET=aarch64-linux-gnu ;; \
+    armhf)           ADD_ARCH=armhf;   TRIPLET=arm-linux-gnueabihf ;; \
+    riscv64)         ADD_ARCH=riscv64; TRIPLET=riscv64-linux-gnu ;; \
+    ppc64le|ppc64el) ADD_ARCH=ppc64el; TRIPLET=powerpc64le-linux-gnu ;; \
+    s390x)           ADD_ARCH=s390x;   TRIPLET=s390x-linux-gnu ;; \
+    x86_64|amd64)    ADD_ARCH=amd64;   TRIPLET=x86_64-linux-gnu ;; \
+    *) echo "Unsupported CROSS_ARCH: $CROSS_ARCH"; exit 1 ;; \
+  esac; \
+  PKG_GCC=gcc-${GCC_VER}-${TRIPLET}; \
+  PKG_GXX=g++-${GCC_VER}-${TRIPLET}; \
+  PKG_LIBC=libc6-dev-${ADD_ARCH}-cross; \
+  PKG_BINUTILS=binutils-${TRIPLET}; \
+  apt-get update || true; \
+  apt-get install -y --no-install-recommends "$PKG_GCC" "$PKG_GXX" "$PKG_LIBC" "$PKG_BINUTILS"; \
+  update-alternatives --install /usr/bin/${TRIPLET}-gcc  ${TRIPLET}-gcc  /usr/bin/${TRIPLET}-gcc-${GCC_VER} 100; \
+  update-alternatives --install /usr/bin/${TRIPLET}-g++  ${TRIPLET}-g++  /usr/bin/${TRIPLET}-g++-${GCC_VER} 100; \
+  update-alternatives --install /usr/bin/${TRIPLET}-gcov ${TRIPLET}-gcov /usr/bin/${TRIPLET}-gcov-${GCC_VER} 100
+
+
+RUN rm -rf /var/lib/apt/lists/*

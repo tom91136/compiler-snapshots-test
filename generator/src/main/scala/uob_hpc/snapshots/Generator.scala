@@ -45,16 +45,19 @@ case class Config(
 val GCC = Config(
   name = "gcc",
   mirror = "https://github.com/gcc-mirror/gcc.git",
-  arches = Vector("x86_64", "aarch64", "ppc64le"),
+  arches = Vector("x86_64", "aarch64", "ppc64le", "riscv64"),
   basepointTags = {
     case (s"refs/tags/basepoints/gcc-$ver", ref)                                       => ver          -> ref
     case (s"refs/tags/releases/gcc-$maj.$min.0", ref) if maj.toIntOption.exists(_ < 5) => s"$maj.$min" -> ref
   },
   versionBranches = { case (s"refs/heads/releases/gcc-$ver", ref) => ver -> ref },
   filter = { // see https://gcc.gnu.org/releases.html
-    case (ver, "x86_64")  => ver.toFloatOption.exists(_ >= 4.0)
-    case (ver, "aarch64") => ver.toFloatOption.exists(_ >= 4.8) // aarch64 only really worked after 4.8
-    case (ver, "ppc64le") => ver.toFloatOption.exists(_ >= 5.0) // ppc64le needed IBM patches in 4.8~4.9
+    case (ver, "x86_64")  => ver.toFloatOption.exists(_ >= 4.0f)
+    case (ver, "aarch64") => ver.toFloatOption.exists(_ >= 4.8f) // aarch64 only really worked after 4.8
+    case (ver, "ppc64le") => ver.toFloatOption.exists(_ >= 5.0f) // ppc64le needed IBM patches in 4.8~4.9
+    case (ver, "riscv64") =>
+      // the first half of 7 doesn't have riscv host support, at this time the support is basic anyway so just start at 8
+      ver.toFloatOption.exists(_ >= 8.0f)
     case (_, arch)        => throw IllegalArgumentException(s"Unsupported arch: $arch")
   }
 )
@@ -68,7 +71,7 @@ val GCC = Config(
 val LLVM = Config(
   name = "llvm",
   mirror = "https://github.com/llvm/llvm-project.git",
-  arches = Vector("x86_64", "aarch64", "ppc64le"),
+  arches = Vector("x86_64", "aarch64", "ppc64le", "riscv64"),
   basepointTags = {
     case (s"refs/tags/llvmorg-$maj.$min.$_", ref) if min.forall(_.isDigit) && maj.toIntOption.exists(_ <= 3) =>
       s"$maj.$min" -> ref // <= 3.x series, no basepoints and keep minor
@@ -82,6 +85,7 @@ val LLVM = Config(
     case (ver, "x86_64")  => ver.toFloatOption.exists(_ >= 3.0f)
     case (ver, "aarch64") => ver.toFloatOption.exists(_ >= 3.6f)
     case (ver, "ppc64le") => ver.toFloatOption.exists(_ >= 3.6f)
+    case (ver, "riscv64") => ver.toFloatOption.exists(_ >= 9.0f)
     case (_, arch)        => throw IllegalArgumentException(s"Unsupported arch: $arch")
   },
   requirePath = Some("llvm/CMakeLists.txt")
@@ -200,7 +204,7 @@ def resolveIgnores(git: Git, f: Path): Vector[(String, Vector[RevCommit])] =
   scribe.info(s"Max Jobs =        $GHAMaxJobCount")
 
   val sharedIgnores = resolveIgnores(git, Paths.get(s"./ignore_commits.${config.name}"))
-  val archBuilds = config.arches.par.map { arch =>
+  val archBuilds    = config.arches.par.map { arch =>
     val repo               = git.getRepository
     val ignoreCommits      = sharedIgnores ++ resolveIgnores(git, Paths.get(s"./ignore_commits.${config.name}.$arch"))
     val ignoredCommitNames = ignoreCommits.flatMap(_._2.map(_.getName))

@@ -45,7 +45,7 @@ results to only 1k entries; many snapshots will be missing if enumerated this wa
 Testing a build locally: 
 
 ```shell
-docker build -t build_image .
+docker build --platform linux/$(arch) -t build_image .
 docker run --rm -it  -v $PWD:/host/:rw,z  build_image /bin/bash
 # Testing a specific build
 [root@9fd6ab9e5ec7 /] /host/action_build_llvm.sh llvm-5.2017-07-30Z.397fe0b.x86_64
@@ -53,6 +53,15 @@ docker run --rm -it  -v $PWD:/host/:rw,z  build_image /bin/bash
 [root@9fd6ab9e5ec7 /] /host/action_build_llvm.sh 5408e6d64809fd035f781f10178765f724ac797b
 # Bisect example, where GOOD1->BAD->GOOD2, based on actions outcome
 [root@9fd6ab9e5ec7 /] REPO=gcc GOOD1=d656d82 BAD=1d10121 GOOD2=e64f7af /host/test_bisect.sh 
+```
+
+For cross building:
+
+```shell
+docker build --platform linux/$(arch)  -t build_image_cross -f Dockerfile.cross
+docker run --rm -it -v $PWD:/host/:rw,z --security-opt label=disable --mount type=bind,src=/proc/sys/fs/binfmt_misc,target=/proc/sys/fs/binfmt_misc,ro build_image_cross /bin/bash
+# Do a cross build
+root@300f6b3dcc6b:/# CROSS_ARCH=riscv64  /host/action_build_llvm_cross.sh llvm-17.2023-05-28Z.53be2e0.riscv64
 ```
 
 Alternatively with Apptainer/Singularity:
