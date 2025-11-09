@@ -47,7 +47,7 @@ RUN apt-get update || true
 
 
 RUN apt-get install -y --no-install-recommends \
-    build-essential file bzip2 texinfo flex git jq ninja-build python3-dev cmake wget bison automake libssl-dev ccache squashfs-tools
+    build-essential file bzip2 texinfo flex git jq ninja-build python2 python3-dev cmake wget bison automake libssl-dev ccache squashfs-tools
 
 RUN apt-get install -y --no-install-recommends libc6:$CROSS_ARCH libstdc++6:$CROSS_ARCH libgcc-s1:$CROSS_ARCH libatomic1:$CROSS_ARCH
 
