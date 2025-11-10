@@ -1,0 +1,63 @@
+FROM ubuntu:jammy
+
+ARG CROSS_ARCH="riscv"
+ARG CROSS_ARCH_BIT=64
+ARG CROSS_ARCH_ARCH="rv64gc"
+ARG GCC_VER=15
+ARG CTNG_VER=1.28.0
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    software-properties-common ca-certificates gnupg lsb-release build-essential file bzip2 help2man \
+    texinfo flex git jq ninja-build python3-dev python3-distutils unzip gawk cmake wget bison automake \
+    autoconf libssl-dev ccache libtool libtool-bin libtool-doc squashfs-tools libncurses5-dev
+
+RUN wget "http://crosstool-ng.org/download/crosstool-ng/crosstool-ng-$CTNG_VER.tar.xz" && \
+    tar xf "crosstool-ng-$CTNG_VER.tar.xz" && \
+    cd "crosstool-ng-$CTNG_VER" && \
+    ./bootstrap && \
+    ./configure --enable-local && \
+    make -j "$(nproc)"
+
+
+RUN CROSS_ARCH_UPPER="$(echo "$CROSS_ARCH" | tr '[:lower:]' '[:upper:]')" && \
+    tee -a "crosstool-ng-$CTNG_VER/build.config" <<EOF
+CT_CONFIG_VERSION="4"
+CT_ARCH_$CROSS_ARCH_UPPER=y
+CT_ARCH_USE_MMU=y
+CT_ARCH_$CROSS_ARCH_BIT=y
+CT_GCC_V_$GCC_VER=y
+CT_ARCH_ARCH="$CROSS_ARCH_ARCH"
+
+#CT_TARGET_VENDOR="unknown"
+CT_OMIT_TARGET_VENDOR=y
+CT_KERNEL_LINUX=y
+CT_LINUX_HEADERS_USE_ARCH=y
+CT_LINUX_HEADERS_V_6_10=y
+CT_LIBC_GLIBC=y
+CT_GLIBC_V_2_35=y
+
+CT_CC_LANG_CXX=y
+CT_CC_LANG_FORTRAN=y
+CT_CC_SUPPORT_FORTRAN=y
+CT_DEBUG_GDB=n
+
+CT_EXPERIMENTAL=y
+CT_ALLOW_BUILD_AS_ROOT=y
+CT_ALLOW_BUILD_AS_ROOT_SURE=y
+EOF
+
+RUN cd "crosstool-ng-$CTNG_VER" && \
+    DEFCONFIG=build.config ./ct-ng defconfig && \
+    ./ct-ng build
+
+
+RUN cd "crosstool-ng-$CTNG_VER" && \
+    TRIPLET="$(./ct-ng show-tuple)" && \
+    ln -sf "/root/x-tools/$TRIPLET/$TRIPLET/sysroot" "/usr/$TRIPLET" && \
+    ln -sf "/root/x-tools/$TRIPLET/$TRIPLET/sysroot/usr/include" "/usr/$TRIPLET/include" && \
+    echo "export PATH=/root/x-tools/$TRIPLET/bin:\$PATH" >> ~/.bashrc
+
+RUN rm -rf "crosstool-ng-$CTNG_VER" \
+           "crosstool-ng-$CTNG_VER.tar.xz" \
+           /var/lib/apt/lists/*

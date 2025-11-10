@@ -1,13 +1,13 @@
 # Compiler snapshots
 
+This repo/static site contains GCC and LLVM snapshot builds spaced one week apart using the ISO8601
+week-based-year; commits that fail to generate a build are excluded.
 
-This repo/static site contains GCC and LLVM snapshot builds spaced one week apart using the ISO8601 week-based-year; commits that fail to generate a build are excluded.
-
-Builds are compiled in CentOS 7 with glibc 2.17, most distros released after 2012 should be able to just download, untar, and use as-is without any external dependencies
+Builds are compiled in CentOS 7 with glibc 2.17, most distros released after 2012 should be able to
+just download, untar, and use as-is without any external dependencies
 The scripts and Dockerfile for generating the snapshots are available in the repo.
 
-To browse and download snapshots by commit, use the static site: <>.  
- 
+To browse and download snapshots by commit, use the static site: <>.
 
 ## Machine and CI access
 
@@ -39,10 +39,9 @@ The release notes can be received using the GitHub Release API:
 **Note:** It is not recommended to use the Release API for listing releases because GitHub caps the
 results to only 1k entries; many snapshots will be missing if enumerated this way.
 
-
 ## Testing
 
-Testing a build locally: 
+Testing a build locally:
 
 ```shell
 docker build --platform linux/$(arch) -t build_image .
@@ -55,7 +54,7 @@ docker run --rm -it  -v $PWD:/host/:rw,z  build_image /bin/bash
 [root@9fd6ab9e5ec7 /] REPO=gcc GOOD1=d656d82 BAD=1d10121 GOOD2=e64f7af /host/test_bisect.sh 
 ```
 
-For cross building:
+For cross building, via Ubuntu's built-in cross toolchain:
 
 ```shell
 docker build --platform linux/$(arch)  -t build_image_cross -f Dockerfile.cross
@@ -64,7 +63,18 @@ docker run --rm -it -v $PWD:/host/:rw,z --security-opt label=disable --mount typ
 root@300f6b3dcc6b:/# CROSS_ARCH=riscv64  /host/action_build_llvm_cross.sh llvm-17.2023-05-28Z.53be2e0.riscv64
 ```
 
-Alternatively with Apptainer/Singularity:
+We use a different container with up-to-date cross-GCC as the target libs in GCC doesn't really
+build with past versions of itself:
+
+```shell
+docker build --platform linux/$(arch) -t build_image_ctng -f Dockerfile.ctng
+docker run --rm -it -v $PWD:/host/:rw,z --security-opt label=disable --mount type=bind,src=/proc/sys/fs/binfmt_misc,target=/proc/sys/fs/binfmt_misc,ro build_image_ctng /bin/bash
+# Do a cross build
+root@300f6b3dcc6b:/# CROSS_ARCH=riscv64 /host/action_build_gcc_cross.sh gcc-14.2024-09-22Z.cf40866.riscv64
+
+```
+
+Alternatively with Apptainer/Singularity (cross-build not supported):
 
 ```shell
 apptainer build --force build_image.sif Singularity.def

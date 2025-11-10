@@ -57,24 +57,18 @@ for build in "${builds_array[@]}"; do
   # see https://github.com/gcc-mirror/gcc/commit/df2a7a38f6f49656f08e0c34d7856b2709a9e5b6
   WINT_FIX="df2a7a38f6f49656f08e0c34d7856b2709a9e5b6"
 
-  #  TODO
-  CROSS_FIX="4fde88e5dd152fe866a97b12e0f8229970d15cb3"
-
   # Commit after https://github.com/gcc-mirror/gcc/commit/27d68a60783b52504a08503d3fe12054de104241
   # broke build in a way that the target lib only compile for future (1+ the commit) versions of GCC
   # so, we need to disable HF in the target lib
   RISCVHF_FIX="27d68a60783b52504a08503d3fe12054de104241"
 
-  # Undo is_convertible, not available in newer compilers
-  TRAIT_FIX="af85ad891703db220b25e7847f10d0bbec4becf4"
+  # See https://github.com/gcc-mirror/gcc/commit/45116f342057b7facecd3d05c2091ce3a77eda59
+  # where binutils tolerated incorrect JAL in past versions, but now GCC introduced a fix which we backport
+  JAL_FIX="45116f342057b7facecd3d05c2091ce3a77eda59"
 
-  # Commit https://github.com/gcc-mirror/gcc/commit/cb775ecd6e437de8fdba9a3f173f3787e90e98f2
-  # broke Canadian cross with the introduction of __LIBGCC_DWARF_CIE_DATA_ALIGNMENT__ so we shim it
-  DW2_FIX="cb775ecd6e437de8fdba9a3f173f3787e90e98f2"
-
-  # Commit https://github.com/gcc-mirror/gcc/commit/1a566fddea212a6a8e4484f7843d8e5d39b5bff0
-
-  FLOATN_FIX="1a566fddea212a6a8e4484f7843d8e5d39b5bff0"
+  # See https://github.com/gcc-mirror/gcc/commit/2415024e0f81f8c09bf08f947c790b43de9d0bbc
+  # we backport the signature of __cxa_call_terminate void* otherwise we get an ICE at the gimple level
+  CXA_FIX="2415024e0f81f8c09bf08f947c790b43de9d0bbc"
 
   echo "Build   : $build"
   echo "Commit  : $hash"
@@ -87,7 +81,7 @@ for build in "${builds_array[@]}"; do
       --progress \
       --no-recurse-submodules \
       --filter=blob:none \
-      origin "$hash" "$UCTX_FIX" "$WINT_FIX" "$CROSS_FIX" "$RISCVHF_FIX" "$TRAIT_FIX" "$DW2_FIX" "$FLOATN_FIX"
+      origin "$hash" "$UCTX_FIX" "$WINT_FIX" "$RISCVHF_FIX" "$JAL_FIX" "$CXA_FIX"
     git checkout -f -q "$hash"
   else
     git reset HEAD --hard
@@ -193,16 +187,51 @@ for build in "${builds_array[@]}"; do
       done
     fi
 
-    if git_is_ancestor "$CROSS_FIX" "$hash"; then
-      echo "Commit does not require Canadian cross libstdc++ patch, continuing..."
+    if git_is_ancestor "$JAL_FIX" "$hash"; then
+      echo "Commit does not require RISCV JAL fixup, continuing..."
     else
-      for f in libstdc++-v3/src/c++17/Makefile.in libstdc++-v3/src/c++17/Makefile.am; do
-        echo "Patching $f"
-        awk '{
-                gsub(/-std=gnu\+\+17[[:space:]]+/, "-std=gnu++17 -nostdinc++ ");
-                print
-             }' "$f" >tmp && mv tmp "$f"
-      done
+      dif_file="libgcc/config/riscv/div.S"
+      hdr_file="libgcc/config/riscv/riscv-asm.h"
+      echo "Patching $dif_file"
+      awk '
+        BEGIN { have_prev=0; need_hidden=0 }
+        {
+          if (have_prev) {
+            print prev
+            if (need_hidden) {
+              if ($0 !~ /^[ \t]*HIDDEN_DEF[ \t]*\(__udivdi3\)/) {
+                print "HIDDEN_DEF (__udivdi3)"
+              }
+              need_hidden=0
+            }
+          }
+          if ($0 ~ /^[ \t]*(jal|j)[ \t]+__udivdi3([ \t;]|$)/) {
+            sub(/__udivdi3/, "HIDDEN_JUMPTARGET(__udivdi3)")
+          }
+          prev=$0
+          have_prev=1
+          if ($0 ~ /^[ \t]*FUNC_END[ \t]*\(__udivdi3\)[ \t]*$/) { need_hidden=1 }
+        }
+        END {
+          if (have_prev) {
+            print prev
+            if (need_hidden) print "HIDDEN_DEF (__udivdi3)"
+          }
+        }' "$dif_file" >"$dif_file.tmp" && mv "$dif_file.tmp" "$dif_file"
+
+      echo "Patching $hdr_file"
+      awk '
+        { print; if (index($0, "HIDDEN_JUMPTARGET(") > 0) found=1 }
+        END {
+          if (!found) {
+            print ""
+            print "#define CONCAT1(a, b)\t\tCONCAT2(a, b)"
+            print "#define CONCAT2(a, b)\t\ta ## b"
+            print "#define HIDDEN_JUMPTARGET(X)\tCONCAT1(__hidden_, X)"
+            print "#define HIDDEN_DEF(X)\t\tFUNC_ALIAS(HIDDEN_JUMPTARGET(X), X);     \\"
+            print "\t\t\t\t.hidden HIDDEN_JUMPTARGET(X)"
+          }
+        }' "$hdr_file" >"$hdr_file.tmp" && mv "$hdr_file.tmp" "$hdr_file"
     fi
 
     if ! git_is_ancestor "$RISCVHF_FIX" "$hash"; then
@@ -223,37 +252,27 @@ for build in "${builds_array[@]}"; do
       done
     fi
 
-    if ! git_is_ancestor "$TRAIT_FIX" "$hash"; then
-      echo "Commit does not require type_traits cleanup, continuing..."
+    if git_is_ancestor "$CXA_FIX" "$hash"; then
+      echo "Commit does not require patching eh_call.cc, continuing..."
     else
-      f="libstdc++-v3/include/std/type_traits"
+      f="libstdc++-v3/libsupc++/eh_call.cc"
       echo "Patching $f"
-      awk '{
-             gsub(/__is_convertible\(_From,[[:space:]]*_To\);/, "is_convertible<_From, _To>::value;");
-             print
-           }' "$f" >tmp && mv tmp "$f"
-    fi
-
-    if ! git_is_ancestor "$DW2_FIX" "$hash"; then
-      echo "Commit does not require unwind-dw2 fix, continuing..."
-    else
-      f="libgcc/unwind-dw2.c"
-      echo "Patching $f"
-      awk ' /#include <stddef\.h>/ {
-             print
-             print "#ifndef __LIBGCC_DWARF_CIE_DATA_ALIGNMENT__"
-             print "#define __LIBGCC_DWARF_CIE_DATA_ALIGNMENT__ 0"
-             print "#endif"
-             next
-           }
-           { print } ' "$f" >tmp && mv tmp "$f"
-    fi
-
-    if ! git_is_ancestor "$FLOATN_FIX" "$hash"; then
-      echo "Commit does not require future float flags, continuing..."
-    else
-      cxx_target_extra+=(-U__FLT16_DIG__ -U__FLT32_DIG__ -U__FLT64_DIG__ -U__FLT128_DIG__ -U__BFLT16_DIG__)
-      echo "Setting ${cxx_target_extra[*]}"
+      awk ' BEGIN { need_cast = 0 }
+          {
+            line = $0
+            if (line ~ /__cxa_call_terminate\([[:space:]]*_Unwind_Exception\*[[:space:]]*ue_header[[:space:]]*\)[[:space:]]*throw[[:space:]]*\(\)/) {
+              sub(/\(_Unwind_Exception\*[[:space:]]*ue_header\)[[:space:]]*throw[[:space:]]*\(\)/,
+                  "(void* ue_header_in) throw ()", line)
+              need_cast = 1
+            }
+            print line
+            if (need_cast && index(line, "{") > 0) {
+              print "  _Unwind_Exception* ue_header"
+              print "    = reinterpret_cast<_Unwind_Exception*>(ue_header_in);"
+              need_cast = 0
+            }
+          }
+          END { } ' "$f" >tmp && mv tmp "$f"
     fi
 
     nowarn=(
