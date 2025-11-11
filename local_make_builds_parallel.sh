@@ -5,6 +5,7 @@ compiler="${1:?Compiler variant, gcc|llvm}"
 N="${2:?Number of groups/jobs}"
 host_arch="${HOST_ARCH:-$(uname -m)}"
 cross="${CROSS:-false}"
+root="${ROOT:-false}"
 machine_spec="${3:-1-0}"
 
 MACHINES="${machine_spec%%-*}"
@@ -88,6 +89,7 @@ build_one() {
 }
 export HOST_ARCH="$host_arch"
 export CROSS="$cross"
+export ROOT="$root"
 export -f build_one
 
 SHELL="$(command -v bash)" parallel \

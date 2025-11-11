@@ -54,9 +54,12 @@ RUN cd "crosstool-ng-$CTNG_VER" && \
 
 RUN cd "crosstool-ng-$CTNG_VER" && \
     TRIPLET="$(./ct-ng show-tuple)" && \
-    ln -sf "/root/x-tools/$TRIPLET/$TRIPLET/sysroot" "/usr/$TRIPLET" && \
-    ln -sf "/root/x-tools/$TRIPLET/$TRIPLET/sysroot/usr/include" "/usr/$TRIPLET/include" && \
-    echo "export PATH=/root/x-tools/$TRIPLET/bin:\$PATH" >> ~/.bashrc
+    ln -sf "/root/x-tools/$TRIPLET" "/ctng-root" && \
+    ln -sf "/ctng-root/$TRIPLET/sysroot" "/usr/$TRIPLET" && \
+    ln -sf "/ctng-root/$TRIPLET/sysroot/usr/include" "/usr/$TRIPLET/include" && \
+    echo "export PATH=/ctng-root/bin:\$PATH" >> ~/.bashrc
+
+ENV PATH="/ctng-root/bin:${PATH}"
 
 RUN rm -rf "crosstool-ng-$CTNG_VER" \
            "crosstool-ng-$CTNG_VER.tar.xz" \

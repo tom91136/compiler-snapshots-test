@@ -4,6 +4,7 @@ set -euo pipefail
 matrix_json="$1"
 host_arch="${HOST_ARCH:?host arch, required}"
 cross="${CROSS:?cross compile, required}"
+root="${ROOT:?use privileged container}"
 max_proc="${MAX_PROC:?max processors per build container, required}"
 
 name="${matrix_json%.*}" && name="${name//\//_}"
@@ -20,16 +21,22 @@ echo "Job count: ${#jobs[@]}"
 
 fmt_time() { date -ud "@$1" +'%Hh%Mm%Ss'; }
 
-if [[ "$cross" == true ]]; then
-  suffix="_cross"
+case "$cross" in
+cross | ctng)
+  suffix="_$cross"
   envs=(CROSS_ARCH="$host_arch" MAX_PROC="$max_proc")
   extra=(--security-opt label=disable --mount "type=bind,src=/proc/sys/fs/binfmt_misc,target=/proc/sys/fs/binfmt_misc,ro")
   echo "Cross compiling to $host_arch"
-else
+  ;;
+false | 0)
   suffix=""
   envs=(MAX_PROC="$max_proc")
   extra=()
-fi
+  ;;
+*) echo "Unsupported cross type $cross" && exit 1 ;;
+esac
+
+if [[ "$root" == true ]]; then extra+=(--privileged); fi
 
 docker create --name "$container_name" --replace -v "$PWD:/host" \
   --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
