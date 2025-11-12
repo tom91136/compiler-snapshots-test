@@ -70,7 +70,7 @@ build with past versions of itself:
 docker build --platform linux/$(arch) -t build_image_ctng -f Dockerfile.ctng
 docker run --rm -it -v $PWD:/host/:rw,z --security-opt label=disable --mount type=bind,src=/proc/sys/fs/binfmt_misc,target=/proc/sys/fs/binfmt_misc,ro build_image_ctng /bin/bash
 # Do a cross build
-root@300f6b3dcc6b:/# CROSS_ARCH=riscv64 /host/action_build_gcc_cross.sh gcc-14.2024-09-22Z.cf40866.riscv64
+root@300f6b3dcc6b:/# CROSS_ARCH=riscv64 /host/action_build_gcc_ctng.sh gcc-14.2024-09-22Z.cf40866.riscv64
 
 ```
 

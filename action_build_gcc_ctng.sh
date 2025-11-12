@@ -321,16 +321,11 @@ for build in "${builds_array[@]}"; do
           --host="$CROSS_ARCH-linux-gnu" \
           --target="$CROSS_ARCH-linux-gnu" \
           --with-sysroot="/usr/$CROSS_ARCH-linux-gnu" \
-          --with-native-system-header-dir="/include" \
           "${config_extra[@]}"
       )
 
-      time make -C build -j "$build_nproc" \
-        all-gcc all-target-libgcc all-target-libstdc++-v3
-
-      time make -C build -j "$install_nproc" \
-        install-gcc install-target-libgcc install-target-libstdc++-v3 \
-        DESTDIR="$dest_dir"
+      time make -C build -j "$build_nproc" all-gcc all-target
+      time make -C build -j "$install_nproc" install-gcc install-target DESTDIR="$dest_dir"
 
     } 2>&1 | tee "$install_dir/build.log"
 
