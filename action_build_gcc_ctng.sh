@@ -57,11 +57,6 @@ for build in "${builds_array[@]}"; do
   # see https://github.com/gcc-mirror/gcc/commit/df2a7a38f6f49656f08e0c34d7856b2709a9e5b6
   WINT_FIX="df2a7a38f6f49656f08e0c34d7856b2709a9e5b6"
 
-  # Commit after https://github.com/gcc-mirror/gcc/commit/27d68a60783b52504a08503d3fe12054de104241
-  # broke build in a way that the target lib only compile for future (1+ the commit) versions of GCC
-  # so, we need to disable HF in the target lib
-  RISCVHF_FIX="27d68a60783b52504a08503d3fe12054de104241"
-
   # See https://github.com/gcc-mirror/gcc/commit/45116f342057b7facecd3d05c2091ce3a77eda59
   # where binutils tolerated incorrect JAL in past versions, but now GCC introduced a fix which we backport
   JAL_FIX="45116f342057b7facecd3d05c2091ce3a77eda59"
@@ -81,7 +76,7 @@ for build in "${builds_array[@]}"; do
       --progress \
       --no-recurse-submodules \
       --filter=blob:none \
-      origin "$hash" "$UCTX_FIX" "$WINT_FIX" "$RISCVHF_FIX" "$JAL_FIX" "$CXA_FIX"
+      origin "$hash" "$UCTX_FIX" "$WINT_FIX" "$JAL_FIX" "$CXA_FIX"
     git checkout -f -q "$hash"
   else
     git reset HEAD --hard
@@ -232,24 +227,6 @@ for build in "${builds_array[@]}"; do
             print "\t\t\t\t.hidden HIDDEN_JUMPTARGET(X)"
           }
         }' "$hdr_file" >"$hdr_file.tmp" && mv "$hdr_file.tmp" "$hdr_file"
-    fi
-
-    if ! git_is_ancestor "$RISCVHF_FIX" "$hash"; then
-      echo "Commit does not require soft-float cleanup, continuing..."
-    else
-      for f in libgcc/config/riscv/t-softfp32 libgcc/config/riscv/t-softfp64; do
-        if [[ -f "$f" ]]; then
-          echo "Patching $f"
-          awk '{
-                 gsub(/([hb]f(sf|df|tf|[hb]f)|(sf|df|tf)[hb]f)/, "")
-                 gsub(/fix(unsh)?(h?f|bf)(si|di|ti)/, "")
-                 gsub(/float((si|di|ti)|(unsi|undi|unti))(hf|bf)/, "")
-                 print
-               } ' "$f" >tmp && mv tmp "$f"
-        else
-          echo "Skipping $f (file not found)"
-        fi
-      done
     fi
 
     if git_is_ancestor "$CXA_FIX" "$hash"; then
